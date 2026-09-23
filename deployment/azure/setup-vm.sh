@@ -103,7 +103,7 @@ certbot certonly --standalone \
 
 # Configure Nginx
 cp deployment/azure/nginx-am2050.conf /etc/nginx/sites-available/am2050.conf
-sed -i "s/_/${DOMAIN}/g" /etc/nginx/sites-available/am2050.conf
+sed -i "s/server_name _;/server_name ${DOMAIN};/g" /etc/nginx/sites-available/am2050.conf
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/am2050.conf /etc/nginx/sites-enabled/am2050.conf
