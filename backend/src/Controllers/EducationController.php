@@ -14,7 +14,7 @@ final class EducationController {
     private function paginated(Request $request, callable $callback): never { $this->actor($request); $result=$callback(); Response::paginate($result['data'],$result['page'],$result['limit'],$result['total']); }
     private function educationViewer(Request $request): array { $actor=$this->actor($request); RoleMiddleware::allow($actor,['super_admin','program_admin','lga_supervisor','ward_supervisor','headmaster','teacher']); return $actor; }
     private function schoolRegistryManager(Request $request): array { $actor=$this->actor($request); RoleMiddleware::allow($actor,['super_admin','program_admin']); return $actor; }
-    private function schoolOperationsManager(Request $request): array { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster']); return $actor; }
+    private function schoolOperationsManager(Request $request): array { $actor=$this->actor($request); RoleMiddleware::allow($actor,['super_admin','program_admin','headmaster']); return $actor; }
     public function schools(Request $request): never { $this->paginated($request,fn()=>$this->service->schools($this->educationViewer($request),$request->query)); }
     public function createSchool(Request $request): never { $actor=$this->schoolRegistryManager($request); Response::success($this->service->createSchool($actor,$request->body()),201); }
     public function updateSchool(Request $request,array $params): never { $actor=$this->schoolRegistryManager($request); Response::success($this->service->updateSchool($actor,$params['id'],$request->body())); }

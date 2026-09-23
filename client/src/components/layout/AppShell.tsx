@@ -33,9 +33,9 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
 
   const rail = (
     <aside className="flex h-full w-[17.5rem] shrink-0 flex-col bg-[#123148] text-[#f7f4ec] shadow-[12px_0_36px_rgba(18,49,72,0.12)]">
-      <div className="flex h-[5.15rem] items-center justify-between border-b border-white/10 px-5">
+      <div className="flex h-[4.75rem] items-center justify-between border-b border-white/10 px-5">
         <Link href="/workspace" onClick={closeMobile} className="group flex items-center transition-opacity hover:opacity-95">
-          <WordmarkLogo theme="dark" size="md" variant="horizontal" subtitleText="AREWA MISSION" showTagline taglineText="ZERO OUT-OF-SCHOOL CHILDREN" />
+          <WordmarkLogo theme="dark" size="sm" variant="horizontal" subtitleText="FIELD WORKSPACE" showTagline={false} />
         </Link>
         <button
           aria-label="Close menu"
@@ -60,9 +60,9 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
                 key={module.key}
                 href={module.path}
                 onClick={closeMobile}
-                className={`group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${
+                className={`group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-all duration-150 ${
                   active
-                    ? "bg-[#e7f4eb] font-semibold text-[#123148]"
+                    ? "bg-[#167a4c] font-semibold text-white shadow-sm"
                     : "text-[#dce7e1] hover:bg-white/10 hover:text-white"
                 }`}
               >
@@ -73,13 +73,21 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
           })}
         </div>
       </nav>
-      <div className="border-t border-white/10 p-3.5 bg-black/20">
-        <p className="font-mono text-[0.55rem] font-bold uppercase tracking-[0.16em] text-[#34d399]">
-          MISSION TAGLINE
-        </p>
-        <p className="mt-1 font-display text-[0.72rem] font-extrabold uppercase leading-snug tracking-tight text-white/95">
-          ZERO OUT-OF-SCHOOL CHILDREN IN AREWA BY 2050
-        </p>
+      <div className="border-t border-white/10 px-4 py-3 bg-black/25">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="font-mono text-[0.62rem] font-medium tracking-wide text-[#9cc8ae]">
+              AZURE CLOUD • LIVE
+            </span>
+          </div>
+          <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.58rem] font-semibold text-white/70">
+            v2.4.0
+          </span>
+        </div>
       </div>
     </aside>
   );
@@ -108,9 +116,9 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
               <Menu size={20} />
             </button>
             <Link href="/workspace" className="hidden items-center gap-3 border-r border-[#d8e0da] pr-5 xl:flex">
-              <WordmarkLogo theme="light" size="sm" variant="horizontal" subtitleText="AREWA MISSION 2050" />
-              <span className="ml-2 border-l border-[#d8e0da] pl-3 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-[#167a4c]">
-                ZERO OUT-OF-SCHOOL CHILDREN IN AREWA BY 2050
+              <WordmarkLogo theme="light" size="sm" variant="horizontal" showSubtitle={false} showTagline={false} />
+              <span className="rounded-full border border-[#b9dcc3] bg-[#e7f4eb] px-2.5 py-0.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-[#167a4c]">
+                National Unified Field Ledger
               </span>
             </Link>
             <div className="sm:hidden">
