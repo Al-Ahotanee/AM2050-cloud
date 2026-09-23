@@ -32,6 +32,8 @@ services:
       CLOUDINARY_PRODUCT_ENV: "${CLOUDINARY_PRODUCT_ENV:-dxnbuqcfy}"
       TAGLINE: "ZERO OUT FOR SCHOOL IN CHILDREN IN AREWA BY 2050"
     env_file:
+      - path: ../../.env
+        required: false
       - path: .env
         required: false
     logging:
