@@ -1,0 +1,40 @@
+name: AM2050 Azure CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Azure VM (Standard_B1s)
+    runs-on: ubuntu-latest
+    # Only run deploy if secrets are configured
+    if: github.repository == 'Al-Ahotanee/AM2050-cloud'
+    steps:
+      - name: Deploy to Azure VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          key: ${{ secrets.AZURE_SSH_KEY }}
+          port: ${{ secrets.AZURE_SSH_PORT || 22 }}
+          timeout: 300s
+          script: |
+            set -e
+            echo ">> Deploying latest code to /opt/am2050..."
+            cd /opt/am2050
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo ">> Rebuilding and starting container..."
+            docker compose -f deployment/azure/docker-compose.azure.yml build app
+            docker compose -f deployment/azure/docker-compose.azure.yml up -d
+
+            echo ">> Running database migrations..."
+            docker compose -f deployment/azure/docker-compose.azure.yml exec -T app php /var/www/am2050-api/scripts/migrate.php
+
+            echo ">> Performing healthcheck..."
+            sleep 5
+            curl -sf http://127.0.0.1:10000/api/v1/health || (echo "Healthcheck failed!" && exit 1)
+            echo ">> AM2050 successfully deployed and healthy on Azure!"
