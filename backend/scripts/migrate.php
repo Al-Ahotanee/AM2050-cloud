@@ -17,14 +17,16 @@ function isAlreadyAppliedError(Throwable $e): bool
 {
     if ($e instanceof PDOException && isset($e->errorInfo[1])) {
         $code = (int) $e->errorInfo[1];
-        if (in_array($code, [1050, 1060, 1061, 1068, 1826], true)) {
+        if (in_array($code, [1025, 1050, 1060, 1061, 1068, 1091, 1826], true)) {
             return true;
         }
     }
     $msg = strtolower($e->getMessage());
     return str_contains($msg, 'duplicate column') ||
            str_contains($msg, 'already exists') ||
-           str_contains($msg, 'duplicate key');
+           str_contains($msg, 'duplicate key') ||
+           str_contains($msg, "can't drop") ||
+           str_contains($msg, 'check that column/key exists');
 }
 
 function splitSqlStatements(string $sql): array
