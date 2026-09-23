@@ -37,6 +37,9 @@ final class Database
             PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false,
             PDO::MYSQL_ATTR_INIT_COMMAND => "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'",
         ];
+        if (is_file('/etc/ssl/certs/ca-certificates.crt')) {
+            $options[PDO::MYSQL_ATTR_SSL_CA] = '/etc/ssl/certs/ca-certificates.crt';
+        }
         $this->pdo = new PDO($dsn, $user, $pass, $options);
         $this->pdo->exec("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
     }
