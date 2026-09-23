@@ -31,4 +31,4 @@ CREATE TABLE IF NOT EXISTS guardian_certificate_alerts (
   CONSTRAINT fk_gca_child FOREIGN KEY (child_id) REFERENCES children(id),
   CONSTRAINT fk_gca_enrollment FOREIGN KEY (enrollment_id) REFERENCES enrollments(id),
   CONSTRAINT fk_gca_actor FOREIGN KEY (created_by) REFERENCES users(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
