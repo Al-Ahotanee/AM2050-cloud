@@ -66,10 +66,11 @@ final class ProgramService
 
     public function resultsBatch(array $auth, array $data): array
     {
-        foreach (["classId", "termId", "subject", "scores"] as $key) {
+        $scoresList = $data["scores"] ?? $data["records"] ?? null;
+        if (!is_array($scoresList) || empty($scoresList)) throw new RuntimeException("scores list is required.");
+        foreach (["classId", "termId", "subject"] as $key) {
             if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
         }
-        if (!is_array($data["scores"])) throw new RuntimeException("scores must be a list.");
         $classId = (string)$data["classId"];
         $termId = (string)$data["termId"];
         $subject = trim((string)$data["subject"]);
@@ -90,7 +91,7 @@ final class ProgramService
 
         $pdo->beginTransaction();
         try {
-            foreach ($data["scores"] as $item) {
+            foreach ($scoresList as $item) {
                 $enrId = (string)($item["enrollmentId"] ?? "");
                 if (!$enrId) continue;
 
