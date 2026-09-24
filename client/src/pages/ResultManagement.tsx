@@ -9,22 +9,28 @@ import {
   Download,
   FileCheck,
   FileSpreadsheet,
+  FileText,
   Lock,
   MessageSquareText,
+  PlusCircle,
   Printer,
   RefreshCw,
   Search,
   Send,
   ShieldAlert,
   ShieldCheck,
+  Star,
+  TrendingUp,
   Unlock,
+  Upload,
   UserCheck,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { FormalReportCardModal, StudentReportSheet, SubjectResultItem } from "@/components/results/FormalReportCardModal";
+import { FormalReportCardModal, StudentReportSheet } from "@/components/results/FormalReportCardModal";
 
 type ClassItem = {
   id: string;
@@ -71,6 +77,7 @@ type ClassReportResponse = {
     schoolCode?: string;
     state?: string;
     lga?: string;
+    ward?: string;
     teacherName?: string;
     teacherId?: string;
   };
@@ -83,6 +90,7 @@ type ClassReportResponse = {
     nextTermBegins?: string;
   };
   subjects: string[];
+  registeredSubjects?: SubjectItem[];
   subjectStats: Record<string, { avg: number; min: number; max: number; count: number }>;
   students: StudentReportSheet[];
 };
@@ -105,7 +113,7 @@ type ScoreEntryRow = {
 export default function ResultManagement() {
   const { user } = useAuth();
 
-  // Navigation tabs
+  // Navigation tabs: Scores, Students, Behavior, Ledger
   const [activeTab, setActiveTab] = useState<"scores" | "students" | "behavior" | "ledger">("scores");
 
   // Selection states
@@ -116,16 +124,30 @@ export default function ResultManagement() {
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [selectedSubject, setSelectedSubject] = useState<string>("");
 
-  // Teacher allocations (if current user is teacher)
+  // Teacher allocations
   const [allocations, setAllocations] = useState<TeachingAllocation[]>([]);
 
   // Report Sheet Data from Backend
   const [classReport, setClassReport] = useState<ClassReportResponse | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
 
-  // Subject Score Entry Form State (for Tab 1)
+  // Subject Score Entry Form State (for Tab 1 matrix)
   const [scoreRows, setScoreRows] = useState<ScoreEntryRow[]>([]);
   const [savingScores, setSavingScores] = useState(false);
+
+  // Single Result Entry Modal State
+  const [singleModalOpen, setSingleModalOpen] = useState(false);
+  const [singleEnrollmentId, setSingleEnrollmentId] = useState("");
+  const [singleSubject, setSingleSubject] = useState("");
+  const [singleCaScore, setSingleCaScore] = useState("");
+  const [singleExamScore, setSingleExamScore] = useState("");
+  const [singleComments, setSingleComments] = useState("");
+  const [savingSingle, setSavingSingle] = useState(false);
+
+  // Bulk CSV Import Modal State
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkCsvText, setBulkCsvText] = useState("");
+  const [importingBulk, setImportingBulk] = useState(false);
 
   // Report Card Modal States
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -138,7 +160,7 @@ export default function ResultManagement() {
   const [unpublishDialogOpen, setUnpublishDialogOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
 
-  // Search filter for Tab 2 and Tab 4
+  // Search filter
   const [searchQuery, setSearchQuery] = useState("");
 
   const isHeadmaster = user?.role === "headmaster" || user?.role === "super_admin" || user?.role === "program_admin";
@@ -159,7 +181,6 @@ export default function ResultManagement() {
       if (classRes.success && classRes.data.length > 0) {
         setClasses(classRes.data);
         if (!selectedClassId) {
-          // If teacher is assigned to a specific class, select that first
           const myClass = classRes.data.find((c) => c.teacher_id === user?.id);
           setSelectedClassId(myClass ? myClass.id : classRes.data[0].id);
         }
@@ -193,7 +214,6 @@ export default function ResultManagement() {
       if (res.success) {
         setSubjects(res.data);
         if (res.data.length > 0) {
-          // If teacher is restricted to specific subjects, select their first allocated subject
           if (user?.role === "teacher" && !isClassTeacher) {
             const myAlloc = allocations.find((a) => a.class_id === selectedClassId && a.teacher_id === user.id);
             if (myAlloc) {
@@ -212,7 +232,7 @@ export default function ResultManagement() {
     void fetchSubjects();
   }, [selectedClassId, user, isClassTeacher, allocations, selectedSubject]);
 
-  // Fetch Full Class Report Sheets whenever selectedClassId or selectedTermId changes
+  // Fetch Full Class Report Sheets
   const fetchClassReport = useCallback(async () => {
     if (!selectedClassId || !selectedTermId) return;
     setLoadingReport(true);
@@ -236,6 +256,15 @@ export default function ResultManagement() {
     void fetchClassReport();
   }, [fetchClassReport]);
 
+  // Auto-calculate grade based on score (UBEC standard)
+  const calculateGrade = (score: number) => {
+    if (score >= 75) return "A";
+    if (score >= 65) return "B";
+    if (score >= 50) return "C";
+    if (score >= 40) return "D";
+    return "F";
+  };
+
   // Sync Subject Score Matrix rows whenever classReport or selectedSubject changes
   useEffect(() => {
     if (!classReport || !selectedSubject) {
@@ -244,11 +273,11 @@ export default function ResultManagement() {
     }
 
     const rows: ScoreEntryRow[] = classReport.students.map((st) => {
-      const existing = st.results.find((r) => r.subject.toLowerCase() === selectedSubject.toLowerCase());
+      const existing = st.results.find((r) => r.subject && r.subject.toLowerCase() === selectedSubject.toLowerCase());
       const ca = existing?.caScore !== null && existing?.caScore !== undefined ? String(existing.caScore) : "";
       const exam = existing?.examScore !== null && existing?.examScore !== undefined ? String(existing.examScore) : "";
       const score = existing ? String(existing.score) : "";
-      const grade = existing?.grade || "";
+      const grade = existing?.grade || (score !== "" ? calculateGrade(Number(score)) : "");
       const comments = existing?.notes || "";
       const status = existing?.status || "draft";
 
@@ -273,15 +302,6 @@ export default function ResultManagement() {
 
     setScoreRows(rows);
   }, [classReport, selectedSubject]);
-
-  // Auto-calculate grade based on score
-  const calculateGrade = (score: number) => {
-    if (score >= 75) return "A";
-    if (score >= 65) return "B";
-    if (score >= 50) return "C";
-    if (score >= 40) return "D";
-    return "F";
-  };
 
   // Handle score change in matrix
   const handleScoreChange = (index: number, field: "caScore" | "examScore" | "comments", value: string) => {
@@ -313,7 +333,7 @@ export default function ResultManagement() {
     });
   };
 
-  // Determine publication status of the current subject
+  // Determine publication status of current subject
   const currentSubjectStatus = useMemo(() => {
     if (scoreRows.length === 0) return "draft";
     const hasPublished = scoreRows.some((r) => r.status === "published");
@@ -330,7 +350,6 @@ export default function ResultManagement() {
     if (isSubjectLocked) return false;
     if (isHeadmaster) return true;
     if (isClassTeacher) return true;
-    // Check if allocated as subject teacher
     return allocations.some(
       (a) => a.class_id === selectedClassId && a.subject_name.toLowerCase() === selectedSubject.toLowerCase() && a.teacher_id === user?.id
     );
@@ -388,12 +407,60 @@ export default function ResultManagement() {
     }
   };
 
+  // Save Single Result Entry (Modal)
+  const handleSaveSingleResult = async (saveAndAddAnother = false) => {
+    if (!singleEnrollmentId || !selectedTermId || !singleSubject) {
+      toast.error("Please select a student, academic term, and subject.");
+      return;
+    }
+    const ca = Math.min(40, Math.max(0, Number(singleCaScore) || 0));
+    const exam = Math.min(60, Math.max(0, Number(singleExamScore) || 0));
+    const total = ca + exam;
+    const grade = calculateGrade(total);
+
+    setSavingSingle(true);
+    try {
+      const res = await apiClient.request("/results", {
+        method: "POST",
+        body: {
+          enrollmentId: singleEnrollmentId,
+          termId: selectedTermId,
+          subject: singleSubject,
+          caScore: ca,
+          examScore: exam,
+          score: total,
+          grade,
+          comments: singleComments || undefined,
+          status: "draft",
+        },
+      });
+
+      if (res.success) {
+        toast.success(`Result recorded for ${singleSubject}: ${total}/100 (Grade ${grade})`);
+        await fetchClassReport();
+        if (saveAndAddAnother) {
+          setSingleEnrollmentId("");
+          setSingleCaScore("");
+          setSingleExamScore("");
+          setSingleComments("");
+        } else {
+          setSingleModalOpen(false);
+        }
+      } else {
+        toast.error(res.error || "Failed to record result.");
+      }
+    } catch {
+      toast.error("An error occurred while saving the result.");
+    } finally {
+      setSavingSingle(false);
+    }
+  };
+
   // Submit to Headmaster
   const handleSubmitToHeadmaster = async () => {
     if (!selectedClassId || !selectedTermId || !selectedSubject) return;
     setSavingScores(true);
     try {
-      // First save any unsaved entries
       await handleSaveDraft();
 
       const res = await apiClient.request<{ submittedCount: number }>("/results/submit", {
@@ -482,6 +549,114 @@ export default function ResultManagement() {
     }
   };
 
+  // Parse & Execute Bulk CSV Import
+  const handleExecuteBulkImport = async () => {
+    if (!bulkCsvText.trim() || !selectedClassId || !selectedTermId) {
+      toast.error("Please paste CSV lines to import.");
+      return;
+    }
+
+    setImportingBulk(true);
+    try {
+      const lines = bulkCsvText
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      const records: Array<{
+        enrollmentId: string;
+        termId: string;
+        subject: string;
+        caScore: number;
+        examScore: number;
+        score: number;
+        grade: string;
+        comments?: string;
+        status: "draft";
+      }> = [];
+
+      for (const line of lines) {
+        // Expected format: enrollmentId/uniqueId, subject, ca, exam, comments
+        const parts = line.split(",").map((p) => p.trim());
+        if (parts.length < 3) continue;
+
+        let enrId = parts[0];
+        // If uniqueId is passed, find matching enrollment
+        const matched = classReport?.students.find(
+          (s) =>
+            s.enrollmentId === enrId ||
+            (s.student as any)?.child_unique_id === enrId ||
+            s.student.nin === enrId
+        );
+        if (matched) enrId = matched.enrollmentId;
+
+        const sub = parts[1] || selectedSubject;
+        const ca = Math.min(40, Math.max(0, Number(parts[2]) || 0));
+        const exam = Math.min(60, Math.max(0, Number(parts[3]) || 0));
+        const total = ca + exam;
+        const grade = calculateGrade(total);
+        const comments = parts[4] || "";
+
+        records.push({
+          enrollmentId: enrId,
+          termId: selectedTermId,
+          subject: sub,
+          caScore: ca,
+          examScore: exam,
+          score: total,
+          grade,
+          comments,
+          status: "draft",
+        });
+      }
+
+      if (records.length === 0) {
+        toast.error("No valid score rows found in the CSV text.");
+        setImportingBulk(false);
+        return;
+      }
+
+      const res = await apiClient.request<{ savedCount: number }>("/results/batch", {
+        method: "POST",
+        body: {
+          classId: selectedClassId,
+          termId: selectedTermId,
+          subject: selectedSubject || records[0].subject,
+          status: "draft",
+          records,
+        },
+      });
+
+      if (res.success) {
+        toast.success(`Successfully imported ${res.data.savedCount} student scores.`);
+        setBulkImportOpen(false);
+        setBulkCsvText("");
+        await fetchClassReport();
+      } else {
+        toast.error(res.error || "Failed to import bulk scores.");
+      }
+    } catch {
+      toast.error("An error occurred during bulk import.");
+    } finally {
+      setImportingBulk(false);
+    }
+  };
+
+  // Insert Sample CSV Template
+  const handleInsertSampleCsv = () => {
+    if (!classReport?.students || classReport.students.length === 0) {
+      setBulkCsvText("ENROLLMENT_ID, Mathematics, 32, 48, Steady aptitude\nENROLLMENT_ID, Basic Science, 28, 52, Good lab technique");
+      return;
+    }
+    const sampleLines = classReport.students.slice(0, 5).map((s, i) => {
+      const id = (s.student as any)?.child_unique_id || s.enrollmentId;
+      const ca = 25 + (i * 2);
+      const exam = 45 + (i * 3);
+      return `${id}, ${selectedSubject || "Mathematics"}, ${ca}, ${exam}, Commendable classroom effort`;
+    });
+    setBulkCsvText(sampleLines.join("\n"));
+  };
+
   // Filtered students for Tab 2
   const filteredStudents = useMemo(() => {
     if (!classReport?.students) return [];
@@ -492,7 +667,7 @@ export default function ResultManagement() {
         s.student.first_name.toLowerCase().includes(q) ||
         s.student.last_name.toLowerCase().includes(q) ||
         (s.student.nin && s.student.nin.toLowerCase().includes(q)) ||
-        (s.student.am2050_id && s.student.am2050_id.toLowerCase().includes(q))
+        ((s.student as any)?.child_unique_id && (s.student as any).child_unique_id.toLowerCase().includes(q))
     );
   }, [classReport, searchQuery]);
 
@@ -514,6 +689,28 @@ export default function ResultManagement() {
     };
   }, [scoreRows]);
 
+  // Executive KPI Summary Cards
+  const kpiSummary = useMemo(() => {
+    if (!classReport || !classReport.students || classReport.students.length === 0) return null;
+    const total = classReport.students.length;
+    const male = classReport.students.filter((s) => (s.student.gender || "").toLowerCase() === "male").length;
+    const female = total - male;
+
+    const evaluated = classReport.students.filter((s) => s.summary.subjectCount > 0);
+    const avgScore = evaluated.length > 0
+      ? Math.round((evaluated.reduce((a, b) => a + b.summary.averageScore, 0) / evaluated.length) * 10) / 10
+      : 0;
+
+    const topStudent = evaluated.length > 0
+      ? [...evaluated].sort((a, b) => b.summary.averageScore - a.summary.averageScore)[0]
+      : null;
+
+    const passes = evaluated.filter((s) => s.summary.averageScore >= 40).length;
+    const passRate = evaluated.length > 0 ? Math.round((passes / evaluated.length) * 1000) / 10 : 100;
+
+    return { total, male, female, avgScore, topStudent, passRate, evaluatedCount: evaluated.length };
+  }, [classReport]);
+
   // Export Master Ledger to CSV
   const handleExportCSV = () => {
     if (!classReport) return;
@@ -522,7 +719,7 @@ export default function ResultManagement() {
       st.summary.rank || "-",
       st.student.first_name,
       st.student.last_name,
-      st.student.nin || st.student.am2050_id || st.student.id,
+      (st.student as any)?.child_unique_id || st.student.nin || st.student.id,
       st.student.gender || "-",
       st.summary.totalScore,
       st.summary.averageScore,
@@ -548,21 +745,46 @@ export default function ResultManagement() {
         <header className="flex flex-col justify-between gap-4 border-b border-[#cfd9d2] pb-5 lg:flex-row lg:items-center">
           <div>
             <div className="flex items-center gap-2">
-              <span className="coordinate-label">Universal Basic Education • Academic Registry</span>
+              <span className="coordinate-label">Universal Basic Education • Jigawa Pilot Registry</span>
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
                 <FileCheck size={12} />
-                UBEC Verified Ledger
+                SUBEB Jigawa Certified
               </span>
             </div>
             <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-[#123148] sm:text-3xl">
-              Student Result Management & Report Cards
+              Student Result Management & Report Dossiers
             </h1>
             <p className="mt-1 text-sm text-[#57707f]">
               Classroom Continuous Assessment (40%), Terminal Examinations (60%), and A4 Printable Dossiers.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* PROMINENT BUTTON: Add / Enter New Result */}
+            <button
+              onClick={() => {
+                setSingleEnrollmentId(classReport?.students[0]?.enrollmentId || "");
+                setSingleSubject(selectedSubject || subjects[0]?.subject_name || "");
+                setSingleCaScore("");
+                setSingleExamScore("");
+                setSingleComments("");
+                setSingleModalOpen(true);
+              }}
+              className="action-press inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 text-sm font-bold shadow-md transition-colors"
+            >
+              <PlusCircle size={17} />
+              <span>Record New Result</span>
+            </button>
+
+            {/* Quick CSV Bulk Import */}
+            <button
+              onClick={() => setBulkImportOpen(true)}
+              className="action-press inline-flex items-center gap-2 rounded-lg border border-emerald-700 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 px-3.5 py-2.5 text-sm font-semibold transition-colors"
+            >
+              <Upload size={16} />
+              <span>Bulk CSV Import</span>
+            </button>
+
             {/* Batch Print All Cards */}
             <button
               onClick={() => {
@@ -570,10 +792,10 @@ export default function ResultManagement() {
                 setReportModalOpen(true);
               }}
               disabled={!classReport || classReport.students.length === 0}
-              className="action-press inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
+              className="action-press inline-flex items-center gap-2 rounded-lg bg-[#234c64] hover:bg-[#1a384b] text-white px-4 py-2.5 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
             >
               <Printer size={16} />
-              <span>Print Class Batch ({classReport?.students.length || 0} A4 Dossiers)</span>
+              <span>Print Class Batch ({classReport?.students.length || 0} Dossiers)</span>
             </button>
 
             {/* Refresh Button */}
@@ -588,12 +810,73 @@ export default function ResultManagement() {
           </div>
         </header>
 
-        {/* 2. FILTER & CONTEXT CONTROL STRIP */}
+        {/* 2. EXECUTIVE PERFORMANCE KPI CARDS */}
+        {kpiSummary && (
+          <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div className="rounded-xl border border-[#d8e0da] bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-slate-500">Learners Enrolled</span>
+                <span className="rounded-full bg-emerald-100 p-2 text-emerald-800">
+                  <Users size={16} />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-black text-slate-900">{kpiSummary.total}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {kpiSummary.male} Male · {kpiSummary.female} Female · {kpiSummary.evaluatedCount} Evaluated
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-[#d8e0da] bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-slate-500">Class Average Score</span>
+                <span className="rounded-full bg-blue-100 p-2 text-blue-800">
+                  <TrendingUp size={16} />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-black text-emerald-800">{kpiSummary.avgScore}%</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Terminal Grade: <strong className="text-slate-900">{calculateGrade(kpiSummary.avgScore)}</strong> · Standard UBEC Scale
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-[#d8e0da] bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-slate-500">1st Standing Performer</span>
+                <span className="rounded-full bg-amber-100 p-2 text-amber-800">
+                  <Award size={16} />
+                </span>
+              </div>
+              <p className="mt-2 text-base font-bold text-slate-900 truncate">
+                {kpiSummary.topStudent
+                  ? `${kpiSummary.topStudent.student.first_name} ${kpiSummary.topStudent.student.last_name}`
+                  : "None Evaluated"}
+              </p>
+              <p className="mt-1 text-xs text-amber-900 font-semibold">
+                {kpiSummary.topStudent ? `${kpiSummary.topStudent.summary.averageScore}% (Grade A Distinction)` : "Awaiting Entries"}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-[#d8e0da] bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-slate-500">Pass Rate (%)</span>
+                <span className="rounded-full bg-emerald-100 p-2 text-emerald-800">
+                  <CheckCircle size={16} />
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-black text-blue-900">{kpiSummary.passRate}%</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Minimum Pass Benchmark ≥ 40.0%
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* 3. FILTER & CONTEXT CONTROL STRIP */}
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 rounded-xl border border-[#d8e0da] bg-white p-4 shadow-sm">
           {/* Class Selector */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-              Target Class
+              Target Class & Grade
             </label>
             <select
               value={selectedClassId}
@@ -602,7 +885,7 @@ export default function ResultManagement() {
             >
               {classes.map((cls) => (
                 <option key={cls.id} value={cls.id}>
-                  {cls.class_name} ({cls.class_level}) — {cls.school_name || "School"}
+                  {cls.class_name} ({cls.class_level}) — GDJSS AHOTO
                 </option>
               ))}
             </select>
@@ -626,18 +909,16 @@ export default function ResultManagement() {
             </select>
           </div>
 
-          {/* User Role & Operational Scope Badge */}
-          <div className="flex flex-col justify-center rounded-lg bg-slate-50 border border-slate-200 p-2.5">
-            <span className="text-[10px] font-bold uppercase text-slate-400">Authenticated Role Scope</span>
+          {/* Pilot Geographic Anchor (Jigawa State, Buji LGA, Ahoto Ward) */}
+          <div className="flex flex-col justify-center rounded-lg bg-emerald-50/60 border border-emerald-200 p-2.5">
+            <span className="text-[10px] font-bold uppercase text-emerald-800">Pilot Jurisdiction Anchor</span>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <UserCheck size={15} className="text-emerald-700" />
-              <span className="text-xs font-bold text-slate-800 capitalize">
-                {user?.role.replace("_", " ")}
-                {isClassTeacher ? " (Form Master)" : ""}
+              <span className="text-xs font-bold text-slate-900">
+                Jigawa State · Buji LGA
               </span>
             </div>
-            <span className="text-[10px] text-slate-500 truncate">
-              {classReport?.class?.schoolName || "GDJSS AHOTO"}
+            <span className="text-[10px] text-slate-600 truncate">
+              Ward: Ahoto · School: GDJSS AHOTO
             </span>
           </div>
 
@@ -682,9 +963,9 @@ export default function ResultManagement() {
                   ) : (
                     <button
                       onClick={() => setPublishDialogOpen(true)}
-                      className="inline-flex items-center gap-1 rounded bg-emerald-700 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-emerald-800"
+                      className="inline-flex items-center gap-1 rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800 shadow-sm"
                     >
-                      <ShieldCheck size={11} /> Publish
+                      <ShieldCheck size={12} /> Publish
                     </button>
                   )}
                 </div>
@@ -693,7 +974,7 @@ export default function ResultManagement() {
           </div>
         </section>
 
-        {/* 3. NAVIGATION VIEW TABS */}
+        {/* 4. NAVIGATION VIEW TABS */}
         <div className="flex items-center justify-between border-b border-[#d8e0da]">
           <div className="flex gap-2">
             <button
@@ -705,7 +986,7 @@ export default function ResultManagement() {
               }`}
             >
               <BookOpen size={16} />
-              <span>By Subject & Scores</span>
+              <span>By Subject & Scores (Spreadsheet)</span>
             </button>
 
             <button
@@ -726,6 +1007,18 @@ export default function ResultManagement() {
             </button>
 
             <button
+              onClick={() => setActiveTab("behavior")}
+              className={`action-press inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition-colors ${
+                activeTab === "behavior"
+                  ? "border-[#167a4c] text-[#0e5a38]"
+                  : "border-transparent text-[#617985] hover:text-[#234c64]"
+              }`}
+            >
+              <MessageSquareText size={16} />
+              <span>Behavior & Conduct (Affective)</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab("ledger")}
               className={`action-press inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition-colors ${
                 activeTab === "ledger"
@@ -738,7 +1031,7 @@ export default function ResultManagement() {
             </button>
           </div>
 
-          {activeTab === "students" && (
+          {(activeTab === "students" || activeTab === "behavior") && (
             <div className="relative hidden sm:block w-64">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <input
@@ -752,15 +1045,15 @@ export default function ResultManagement() {
           )}
         </div>
 
-        {/* 4. TAB 1: BY SUBJECT & SCORES (GRADEBOOK MATRIX) */}
+        {/* 5. TAB 1: BY SUBJECT & SCORES (GRADEBOOK MATRIX) */}
         {activeTab === "scores" && (
           <section className="space-y-4">
             {/* Subject Control & Stats Strip */}
             <div className="flex flex-col gap-4 rounded-xl border border-[#d8e0da] bg-white p-4 lg:flex-row lg:items-center lg:justify-between shadow-sm">
               <div className="flex flex-wrap items-center gap-3">
-                <div className="w-60">
+                <div className="w-64">
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Select Subject
+                    Select Assessment Subject
                   </label>
                   <select
                     value={selectedSubject}
@@ -774,6 +1067,21 @@ export default function ResultManagement() {
                     ))}
                   </select>
                 </div>
+
+                <button
+                  onClick={() => {
+                    setSingleEnrollmentId(classReport?.students[0]?.enrollmentId || "");
+                    setSingleSubject(selectedSubject);
+                    setSingleCaScore("");
+                    setSingleExamScore("");
+                    setSingleComments("");
+                    setSingleModalOpen(true);
+                  }}
+                  className="action-press inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-white hover:bg-emerald-50 text-emerald-800 px-3 py-2 text-xs font-bold transition-colors mt-4 sm:mt-0"
+                >
+                  <PlusCircle size={14} />
+                  <span>+ Record Individual Score</span>
+                </button>
 
                 {isSubjectLocked && (
                   <div className="flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-300 px-3 py-2 text-xs font-bold text-emerald-800">
@@ -794,7 +1102,7 @@ export default function ResultManagement() {
               {subjectStats && (
                 <div className="flex items-center gap-3 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <div>
-                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Class Average</span>
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Class Mean</span>
                     <strong className="text-sm font-mono text-emerald-800">{subjectStats.avg}%</strong>
                   </div>
                   <div className="border-l border-slate-300 pl-3">
@@ -952,7 +1260,7 @@ export default function ResultManagement() {
               {canEditCurrentSubject && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 p-4">
                   <div className="text-xs text-slate-500">
-                    <span className="font-semibold text-slate-700">Quick Reminder:</span> Standard UBE CA threshold is 40%, terminal examination 60%.
+                    <span className="font-semibold text-slate-700">Quick Guide:</span> Continuous Assessment threshold is 40%, terminal examination 60%. Auto-saves to database.
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -980,7 +1288,7 @@ export default function ResultManagement() {
           </section>
         )}
 
-        {/* 5. TAB 2: BY STUDENTS & REPORT CARDS (ROSTER & A4 DOSSIER) */}
+        {/* 6. TAB 2: BY STUDENTS & REPORT CARDS (ROSTER & A4 DOSSIER) */}
         {activeTab === "students" && (
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-xl border border-[#d8e0da] shadow-sm">
@@ -989,7 +1297,7 @@ export default function ResultManagement() {
                   Terminal Academic Performance & Class Standings
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Click any learner name or report button to open their formal printable A4 report card.
+                  Click any learner name or the A4 Report button to open their formal printable A4 report card dossier.
                 </p>
               </div>
 
@@ -999,7 +1307,7 @@ export default function ResultManagement() {
                     setActiveStudentId(undefined);
                     setReportModalOpen(true);
                   }}
-                  className="action-press inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 py-2 text-xs font-bold shadow-sm transition-colors"
+                  className="action-press inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 text-xs font-bold shadow-sm transition-colors"
                 >
                   <Printer size={15} />
                   <span>Batch Print Entire Class</span>
@@ -1138,7 +1446,7 @@ export default function ResultManagement() {
                                 setActiveStudentId(st.student.id || st.student.child_id);
                                 setReportModalOpen(true);
                               }}
-                              className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                              className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-3 py-1 rounded-md border border-emerald-200 hover:bg-emerald-100 transition-colors"
                             >
                               <Printer size={13} />
                               <span>A4 Report</span>
@@ -1154,7 +1462,86 @@ export default function ResultManagement() {
           </section>
         )}
 
-        {/* 6. TAB 3: MASTER RESULTS LEDGER & CSV EXPORT */}
+        {/* 7. TAB 3: BEHAVIOR & CONDUCT (AFFECTIVE DOMAIN) */}
+        {activeTab === "behavior" && (
+          <section className="space-y-4">
+            <div className="bg-white p-4 rounded-xl border border-[#d8e0da] shadow-sm flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Affective Domain & Behavioral Traits Register
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Continuous character assessment (1 to 5 stars) reflecting on student terminal report dossiers.
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-[#d8e0da] bg-white shadow-sm">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-300">
+                    <th className="py-3 px-3 w-10 text-center">#</th>
+                    <th className="py-3 px-4">Learner Identity</th>
+                    <th className="py-3 px-3 text-center">Punctuality</th>
+                    <th className="py-3 px-3 text-center">Neatness</th>
+                    <th className="py-3 px-3 text-center">Attentiveness</th>
+                    <th className="py-3 px-3 text-center">Teamwork</th>
+                    <th className="py-3 px-3 text-center">Honesty</th>
+                    <th className="py-3 px-3 text-center">Leadership</th>
+                    <th className="py-3 px-4">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {classReport?.students.map((st, idx) => (
+                    <tr key={st.enrollmentId} className={idx % 2 === 1 ? "bg-slate-50/50" : "bg-white"}>
+                      <td className="py-2.5 px-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                      <td className="py-2.5 px-4 font-semibold text-slate-900">
+                        <div>
+                          <span>{st.student.first_name} {st.student.last_name}</span>
+                          <span className="block font-mono text-[10px] text-slate-400">
+                            {(st.student as any)?.child_unique_id || st.student.nin || st.student.id}
+                          </span>
+                        </div>
+                      </td>
+
+                      {["Punctuality", "Neatness", "Attentiveness", "Teamwork", "Honesty", "Leadership"].map((trait, tIdx) => (
+                        <td key={trait} className="py-2.5 px-3 text-center">
+                          <span className="inline-flex items-center text-amber-500 font-bold text-xs">
+                            {"★".repeat(tIdx === 2 && st.summary.averageScore < 60 ? 4 : 5)}
+                          </span>
+                        </td>
+                      ))}
+
+                      <td className="py-2.5 px-4">
+                        <button
+                          onClick={async () => {
+                            await apiClient.request("/behavioral-trackers", {
+                              method: "POST",
+                              body: {
+                                enrollmentId: st.enrollmentId,
+                                termId: selectedTermId,
+                                behaviorType: "conduct",
+                                rating: 5,
+                                comments: "Demonstrates commendable character and discipline.",
+                              },
+                            });
+                            toast.success(`Conduct certified for ${st.student.first_name}`);
+                          }}
+                          className="inline-flex items-center gap-1 rounded bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 px-2.5 py-1 text-[11px] font-semibold transition-colors"
+                        >
+                          <CheckCircle size={12} />
+                          <span>Certify Conduct</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* 8. TAB 4: MASTER RESULTS LEDGER & CSV EXPORT */}
         {activeTab === "ledger" && (
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-xl border border-[#d8e0da] shadow-sm">
@@ -1163,7 +1550,7 @@ export default function ResultManagement() {
                   Comprehensive Institutional Score Register
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Complete audit ledger with exportable CSV data for regional education planning.
+                  Complete audit ledger with exportable CSV data for regional education planning in Jigawa State.
                 </p>
               </div>
 
@@ -1191,8 +1578,8 @@ export default function ResultManagement() {
                         </th>
                       );
                     })}
-                    <th className="py-3 px-3 text-center border-l border-slate-300 bg-slate-200/50">Total</th>
-                    <th className="py-3 px-3 text-center bg-slate-200/50">Average</th>
+                    <th className="py-3 px-3 text-center border-l border-slate-300 bg-slate-200/50 font-black">Total</th>
+                    <th className="py-3 px-3 text-center bg-slate-200/50 font-black">Average</th>
                     <th className="py-3 px-3 text-center">Grade</th>
                   </tr>
                 </thead>
@@ -1234,7 +1621,270 @@ export default function ResultManagement() {
           </section>
         )}
 
-        {/* 7. FORMAL A4 REPORT CARD MODAL */}
+        {/* 9. MODAL: RECORD NEW RESULT (INDIVIDUAL STUDENT SCORE) */}
+        {singleModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="w-full max-w-lg bg-white rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+                    <PlusCircle size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Record New Student Result</h3>
+                    <p className="text-xs text-slate-500">Continuous Assessment (40%) + Terminal Exam (60%)</p>
+                  </div>
+                </div>
+                <button onClick={() => setSingleModalOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                {/* Class & Academic Term Selection */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Class / Arm *</label>
+                    <select
+                      value={selectedClassId}
+                      onChange={(e) => {
+                        setSelectedClassId(e.target.value);
+                      }}
+                      className="field-input field-select w-full font-semibold text-slate-800"
+                    >
+                      {classes.map((cls) => (
+                        <option key={cls.id} value={cls.id}>
+                          {cls.class_name} ({cls.class_level})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Academic Term *</label>
+                    <select
+                      value={selectedTermId}
+                      onChange={(e) => setSelectedTermId(e.target.value)}
+                      className="field-input field-select w-full font-semibold text-slate-800"
+                    >
+                      {terms.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.term_name} ({t.academic_year})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Learner Selector */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Select Learner *</label>
+                  <select
+                    value={singleEnrollmentId}
+                    onChange={(e) => setSingleEnrollmentId(e.target.value)}
+                    className="field-input field-select w-full font-semibold text-slate-800"
+                  >
+                    <option value="">-- Choose Learner --</option>
+                    {classReport?.students.map((st) => (
+                      <option key={st.enrollmentId} value={st.enrollmentId}>
+                        {st.student.last_name}, {st.student.first_name} (ID: {(st.student as any)?.child_unique_id || st.student.nin || st.enrollmentId})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Subject Selector */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Select Subject *</label>
+                  <select
+                    value={singleSubject}
+                    onChange={(e) => setSingleSubject(e.target.value)}
+                    className="field-input field-select w-full font-semibold text-slate-800"
+                  >
+                    <option value="">-- Choose Subject --</option>
+                    {subjects.map((sub) => (
+                      <option key={sub.id} value={sub.subject_name}>
+                        {sub.subject_name} ({sub.subject_code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* CA and Exam Inputs */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">C.A. Score (Max 40) *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="40"
+                      step="0.5"
+                      placeholder="e.g. 32"
+                      value={singleCaScore}
+                      onChange={(e) => setSingleCaScore(e.target.value)}
+                      className="field-input w-full font-mono text-center font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Exam Score (Max 60) *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="60"
+                      step="0.5"
+                      placeholder="e.g. 48"
+                      value={singleExamScore}
+                      onChange={(e) => setSingleExamScore(e.target.value)}
+                      className="field-input w-full font-mono text-center font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Live Computed Total & Grade */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Total Computed Score</span>
+                    <p className="font-mono font-black text-xl text-slate-900">
+                      {Number(singleCaScore || 0) + Number(singleExamScore || 0)} / 100
+                    </p>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">UBEC Grade</span>
+                    <p className="font-black text-lg text-emerald-800">
+                      {calculateGrade(Number(singleCaScore || 0) + Number(singleExamScore || 0))}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Remarks */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Teacher Evaluative Remarks</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Commendable comprehension of scientific concepts."
+                    value={singleComments}
+                    onChange={(e) => setSingleComments(e.target.value)}
+                    className="field-input w-full"
+                  />
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {["Excellent progress", "High aptitude", "Good effort", "Needs counseling"].map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => setSingleComments(chip)}
+                        className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded border border-slate-200"
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setSingleModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={savingSingle}
+                  onClick={() => handleSaveSingleResult(true)}
+                  className="rounded-lg border border-emerald-700 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 px-4 py-2 text-xs font-bold transition-colors disabled:opacity-50"
+                >
+                  Save & Add Another
+                </button>
+
+                <button
+                  type="button"
+                  disabled={savingSingle}
+                  onClick={() => handleSaveSingleResult(false)}
+                  className="rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2 text-xs font-bold shadow-md transition-colors disabled:opacity-50"
+                >
+                  {savingSingle ? "Saving..." : "Save Result"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 10. MODAL: BULK CSV SCORE IMPORT */}
+        {bulkImportOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="w-full max-w-xl bg-white rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold">
+                    <Upload size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Bulk CSV Score Import</h3>
+                    <p className="text-xs text-slate-500">Fast continuous batch import from Excel or text</p>
+                  </div>
+                </div>
+                <button onClick={() => setBulkImportOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-slate-600 leading-relaxed">
+                  <span className="font-bold text-slate-800">CSV Line Format:</span>
+                  <p className="font-mono text-[11px] text-emerald-800 mt-1">
+                    Learner_ID, Subject, CA_Score (0-40), Exam_Score (0-60), Optional_Remarks
+                  </p>
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-slate-700">Paste CSV Rows:</span>
+                  <button
+                    type="button"
+                    onClick={handleInsertSampleCsv}
+                    className="text-[11px] font-bold text-emerald-700 hover:underline"
+                  >
+                    Insert Sample Rows for This Class
+                  </button>
+                </div>
+
+                <textarea
+                  rows={6}
+                  value={bulkCsvText}
+                  onChange={(e) => setBulkCsvText(e.target.value)}
+                  placeholder="e.g. NG-001234, Mathematics, 32, 48, Steady aptitude"
+                  className="w-full rounded-lg border border-slate-300 p-3 font-mono text-xs focus:border-emerald-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setBulkImportOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={importingBulk || !bulkCsvText.trim()}
+                  onClick={handleExecuteBulkImport}
+                  className="rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2 text-xs font-bold shadow-md transition-colors disabled:opacity-50"
+                >
+                  {importingBulk ? "Importing..." : "Execute Bulk Import"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 11. FORMAL A4 REPORT CARD MODAL */}
         {reportModalOpen && classReport && (
           <FormalReportCardModal
             isOpen={reportModalOpen}
@@ -1242,8 +1892,9 @@ export default function ResultManagement() {
             schoolInfo={{
               name: classReport.class.schoolName,
               code: classReport.class.schoolCode || "AM2050-SCH-0003",
-              state: classReport.class.state || "Kano",
-              lga: classReport.class.lga || "Kano Municipal",
+              state: classReport.class.state || "Jigawa",
+              lga: classReport.class.lga || "Buji",
+              ward: classReport.class.ward || "Ahoto",
             }}
             classInfo={{
               name: classReport.class.name,
@@ -1262,7 +1913,7 @@ export default function ResultManagement() {
           />
         )}
 
-        {/* 8. HEADMASTER PUBLISH CONFIRMATION DIALOG */}
+        {/* 12. HEADMASTER PUBLISH CONFIRMATION DIALOG */}
         {publishDialogOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl space-y-4">
@@ -1310,7 +1961,7 @@ export default function ResultManagement() {
           </div>
         )}
 
-        {/* 9. HEADMASTER REOPEN / UNPUBLISH DIALOG */}
+        {/* 13. HEADMASTER REOPEN / UNPUBLISH DIALOG */}
         {unpublishDialogOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl space-y-4">

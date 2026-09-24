@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import json
 import ssl
 import urllib.request
@@ -79,9 +79,8 @@ print("\n>> Phase 3: Geographic Governance Structure (States / LGAs / Wards / Co
 status, res = api_request("GET", "/states", token=admin_token)
 states = get_items(res)
 jigawa_id = next((s["id"] for s in states if s.get("code") == "JIG"), None)
-kano_id = next((s["id"] for s in states if s.get("code") == "KAN"), None)
-target_state_id = jigawa_id or kano_id
-record("State Verification / Seeding (Jigawa, Kano)", bool(target_state_id), f"State ID: {target_state_id}")
+target_state_id = jigawa_id
+record("State Verification / Seeding (Jigawa)", bool(target_state_id), f"State ID: {target_state_id}")
 
 status, res = api_request("GET", f"/lgas?state_id={target_state_id}", token=admin_token)
 lgas = get_items(res)
