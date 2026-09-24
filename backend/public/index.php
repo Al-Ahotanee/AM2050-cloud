@@ -203,6 +203,12 @@ try {
     $router->add('GET', '/api/v1/terms', static fn(Request $request) => $programController->terms($request));
     $router->add('GET', '/api/v1/results', static fn(Request $request) => $programController->results($request));
     $router->add('POST', '/api/v1/results', static fn(Request $request) => $programController->result($request));
+    $router->add('POST', '/api/v1/results/batch', static fn(Request $request) => $programController->resultsBatch($request));
+    $router->add('POST', '/api/v1/results/submit', static fn(Request $request) => $programController->submitResults($request));
+    $router->add('POST', '/api/v1/results/publish', static fn(Request $request) => $programController->publishResults($request));
+    $router->add('POST', '/api/v1/results/unpublish', static fn(Request $request) => $programController->unpublishResults($request));
+    $router->add('GET', '/api/v1/classes/:id/report-sheets', static fn(Request $request, array $params) => $programController->classReportSheets($request, $params));
+    $router->add('GET', '/api/v1/enrollments/:id/report-sheet', static fn(Request $request, array $params) => $programController->enrollmentReportSheet($request, $params));
     $router->add('GET', '/api/v1/behavioral-trackers', static fn(Request $request) => $programController->behaviors($request));
     $router->add('POST', '/api/v1/behavioral-trackers', static fn(Request $request) => $programController->behavior($request));
     $router->add('POST', '/api/v1/tsangaya-schools', static fn(Request $request) => $programController->tsangaya($request));

@@ -15,24 +15,391 @@ final class ProgramService
 {
     public function __construct(private readonly Database $db, private readonly AuditLogger $audit) {}
 
+    public static function calculateGrade(float $score): string
+    {
+        if ($score >= 75.0) return "A";
+        if ($score >= 65.0) return "B";
+        if ($score >= 50.0) return "C";
+        if ($score >= 40.0) return "D";
+        return "F";
+    }
+
     public function results(array $auth, array $data): array
     {
-        foreach (['enrollmentId', 'termId', 'subject', 'score'] as $key) if (!isset($data[$key])) throw new RuntimeException("{$key} is required.");
-        $enrollment = $this->enrollmentInScope($auth, (string) $data['enrollmentId']);
-        $score = (float) $data['score'];
-        if ($score < 0 || $score > 100) throw new RuntimeException('score must be between 0 and 100.');
-        $this->assertTerm($auth, (string) $data['termId'], $enrollment['state_id']);
-        $this->assertClassSubject((string) $enrollment['class_id'], (string) $data['subject']);
+        foreach (["enrollmentId", "termId", "subject"] as $key) if (!isset($data[$key])) throw new RuntimeException("{$key} is required.");
+        $enrollment = $this->enrollmentInScope($auth, (string) $data["enrollmentId"]);
+        $classId = (string) $enrollment["class_id"];
+        $subject = trim((string) $data["subject"]);
+        $termId = (string) $data["termId"];
+
+        $this->assertResultEditAccess($auth, $classId, $subject);
+        $this->assertResultNotLocked((string)$data["enrollmentId"], $termId, $subject);
+        $this->assertTerm($auth, $termId, $enrollment["state_id"]);
+        $this->assertClassSubject($classId, $subject);
+
+        $ca = isset($data["caScore"]) && $data["caScore"] !== "" ? (float) $data["caScore"] : null;
+        $exam = isset($data["examScore"]) && $data["examScore"] !== "" ? (float) $data["examScore"] : null;
+        if ($ca !== null && $exam !== null) {
+            $score = $ca + $exam;
+        } elseif (isset($data["score"]) && $data["score"] !== "") {
+            $score = (float) $data["score"];
+        } else {
+            throw new RuntimeException("A score or CA/Exam breakdown is required.");
+        }
+
+        if ($score < 0 || $score > 100) throw new RuntimeException("score must be between 0 and 100.");
+        $grade = !empty($data["grade"]) ? trim((string)$data["grade"]) : self::calculateGrade($score);
+        $comments = $data["comments"] ?? null;
+        $status = in_array($data["status"] ?? "draft", ["draft", "submitted"], true) ? $data["status"] : "draft";
+
         $id = Ulids::make();
-        $this->db->pdo()->prepare('INSERT INTO student_results(id,enrollment_id,term_id,subject,score,grade,comments,recorded_by) VALUES(:id,:enrollment,:term,:subject,:score,:grade,:comments,:user) ON DUPLICATE KEY UPDATE score=VALUES(score),grade=VALUES(grade),comments=VALUES(comments),recorded_by=VALUES(recorded_by)')->execute([
-            'id' => $id, 'enrollment' => $data['enrollmentId'], 'term' => $data['termId'], 'subject' => trim((string) $data['subject']), 'score' => $score,
-            'grade' => $data['grade'] ?? null, 'comments' => $data['comments'] ?? null, 'user' => $auth['id'],
+        $this->db->pdo()->prepare("INSERT INTO student_results(id,enrollment_id,term_id,subject,score,ca_score,exam_score,grade,comments,status,recorded_by) VALUES(:id,:enrollment,:term,:subject,:score,:ca,:exam,:grade,:comments,:status,:user) ON DUPLICATE KEY UPDATE score=VALUES(score),ca_score=VALUES(ca_score),exam_score=VALUES(exam_score),grade=VALUES(grade),comments=VALUES(comments),recorded_by=VALUES(recorded_by)")->execute([
+            "id" => $id, "enrollment" => $data["enrollmentId"], "term" => $termId, "subject" => $subject, "score" => $score,
+            "ca" => $ca, "exam" => $exam, "grade" => $grade, "comments" => $comments, "status" => $status, "user" => $auth["id"],
         ]);
-        $statement = $this->db->pdo()->prepare('SELECT id FROM student_results WHERE enrollment_id=:enrollment AND term_id=:term AND subject=:subject');
-        $statement->execute(['enrollment' => $data['enrollmentId'], 'term' => $data['termId'], 'subject' => trim((string) $data['subject'])]);
-        $record = $this->one('student_results', (string) $statement->fetchColumn());
-        $this->audit->record($auth['id'], 'UPSERT', 'student_result', $record['id'], null, $record);
+        $statement = $this->db->pdo()->prepare("SELECT id FROM student_results WHERE enrollment_id=:enrollment AND term_id=:term AND subject=:subject");
+        $statement->execute(["enrollment" => $data["enrollmentId"], "term" => $termId, "subject" => $subject]);
+        $record = $this->one("student_results", (string) $statement->fetchColumn());
+        $this->audit->record($auth["id"], "UPSERT", "student_result", $record["id"], null, $record);
         return $record;
+    }
+
+    public function resultsBatch(array $auth, array $data): array
+    {
+        foreach (["classId", "termId", "subject", "scores"] as $key) {
+            if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
+        }
+        if (!is_array($data["scores"])) throw new RuntimeException("scores must be a list.");
+        $classId = (string)$data["classId"];
+        $termId = (string)$data["termId"];
+        $subject = trim((string)$data["subject"]);
+        $this->assertResultEditAccess($auth, $classId, $subject);
+        $this->assertClassSubject($classId, $subject);
+
+        $pdo = $this->db->pdo();
+        $classSchool = $pdo->prepare("SELECT s.id, w.lga_id, l.state_id FROM school_classes sc INNER JOIN schools s ON s.id=sc.school_id INNER JOIN wards w ON w.id=s.ward_id INNER JOIN lgas l ON l.id=w.lga_id WHERE sc.id=:class");
+        $classSchool->execute(["class" => $classId]);
+        $schoolInfo = $classSchool->fetch() ?: throw new RuntimeException("Class not found.");
+        $this->assertTerm($auth, $termId, $schoolInfo["state_id"]);
+
+        $saved = [];
+        $checkStmt = $pdo->prepare("SELECT id, status FROM student_results WHERE enrollment_id=:enr AND term_id=:term AND subject=:sub");
+        $upsertStmt = $pdo->prepare("INSERT INTO student_results (id, enrollment_id, term_id, subject, score, ca_score, exam_score, grade, comments, status, recorded_by) VALUES (:id, :enr, :term, :sub, :score, :ca, :exam, :grade, :comments, :status, :user) ON DUPLICATE KEY UPDATE score=VALUES(score), ca_score=VALUES(ca_score), exam_score=VALUES(exam_score), grade=VALUES(grade), comments=VALUES(comments), recorded_by=VALUES(recorded_by)");
+
+        $targetStatus = in_array($data["status"] ?? "draft", ["draft", "submitted"], true) ? $data["status"] : "draft";
+
+        $pdo->beginTransaction();
+        try {
+            foreach ($data["scores"] as $item) {
+                $enrId = (string)($item["enrollmentId"] ?? "");
+                if (!$enrId) continue;
+
+                $checkStmt->execute(["enr" => $enrId, "term" => $termId, "sub" => $subject]);
+                $existing = $checkStmt->fetch();
+                if ($existing && ($existing["status"] ?? "") === "published") {
+                    throw new RuntimeException("Results for enrollment {$enrId} in {$subject} are already published and locked against editing.");
+                }
+
+                $ca = isset($item["caScore"]) && $item["caScore"] !== "" ? (float)$item["caScore"] : null;
+                $exam = isset($item["examScore"]) && $item["examScore"] !== "" ? (float)$item["examScore"] : null;
+                if ($ca !== null && $exam !== null) {
+                    $score = $ca + $exam;
+                } elseif (isset($item["score"]) && $item["score"] !== "") {
+                    $score = (float)$item["score"];
+                } else {
+                    continue;
+                }
+                if ($score < 0 || $score > 100) throw new RuntimeException("Total score must be between 0 and 100.");
+
+                $grade = !empty($item["grade"]) ? trim((string)$item["grade"]) : self::calculateGrade($score);
+                $comments = !empty($item["comments"]) ? trim((string)$item["comments"]) : null;
+                $id = $existing["id"] ?? Ulids::make();
+
+                $upsertStmt->execute([
+                    "id" => $id, "enr" => $enrId, "term" => $termId, "sub" => $subject,
+                    "score" => $score, "ca" => $ca, "exam" => $exam, "grade" => $grade,
+                    "comments" => $comments, "status" => $targetStatus, "user" => $auth["id"]
+                ]);
+                $saved[] = $id;
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+
+        $this->audit->record($auth["id"], "BATCH_UPSERT", "student_results", $classId, null, [
+            "classId" => $classId, "termId" => $termId, "subject" => $subject, "savedCount" => count($saved), "status" => $targetStatus
+        ]);
+        return ["savedCount" => count($saved), "classId" => $classId, "termId" => $termId, "subject" => $subject, "status" => $targetStatus];
+    }
+
+    public function submitResults(array $auth, array $data): array
+    {
+        foreach (["classId", "termId"] as $key) {
+            if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
+        }
+        $classId = (string)$data["classId"];
+        $termId = (string)$data["termId"];
+        $subject = !empty($data["subject"]) ? trim((string)$data["subject"]) : null;
+        if ($subject) {
+            $this->assertResultEditAccess($auth, $classId, $subject);
+        }
+        $pdo = $this->db->pdo();
+        $sql = "UPDATE student_results r INNER JOIN enrollments e ON e.id=r.enrollment_id SET r.status='submitted', r.submitted_by=:user, r.submitted_at=NOW() WHERE e.class_id=:class AND r.term_id=:term AND r.status='draft'";
+        $params = ["user" => $auth["id"], "class" => $classId, "term" => $termId];
+        if ($subject) {
+            $sql .= " AND r.subject=:subject";
+            $params["subject"] = $subject;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $count = $stmt->rowCount();
+        $this->audit->record($auth["id"], "SUBMIT", "student_results", $classId, null, ["classId" => $classId, "termId" => $termId, "subject" => $subject, "submittedCount" => $count]);
+        return ["submittedCount" => $count];
+    }
+
+    public function publishResults(array $auth, array $data): array
+    {
+        foreach (["classId", "termId"] as $key) {
+            if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
+        }
+        $classId = (string)$data["classId"];
+        $termId = (string)$data["termId"];
+        $subject = !empty($data["subject"]) ? trim((string)$data["subject"]) : null;
+        $note = !empty($data["note"]) ? trim((string)$data["note"]) : "Officially published by Headmaster";
+        $pdo = $this->db->pdo();
+        $sql = "UPDATE student_results r INNER JOIN enrollments e ON e.id=r.enrollment_id SET r.status='published', r.published_by=:user, r.published_at=NOW(), r.published_note=:note WHERE e.class_id=:class AND r.term_id=:term AND r.status IN ('draft', 'submitted')";
+        $params = ["user" => $auth["id"], "note" => $note, "class" => $classId, "term" => $termId];
+        if ($subject) {
+            $sql .= " AND r.subject=:subject";
+            $params["subject"] = $subject;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $count = $stmt->rowCount();
+        $this->audit->record($auth["id"], "PUBLISH", "student_results", $classId, null, ["classId" => $classId, "termId" => $termId, "subject" => $subject, "publishedCount" => $count]);
+        return ["publishedCount" => $count];
+    }
+
+    public function unpublishResults(array $auth, array $data): array
+    {
+        foreach (["classId", "termId"] as $key) {
+            if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
+        }
+        $classId = (string)$data["classId"];
+        $termId = (string)$data["termId"];
+        $subject = !empty($data["subject"]) ? trim((string)$data["subject"]) : null;
+        $reason = !empty($data["reason"]) ? trim((string)$data["reason"]) : "Reopened for corrections";
+        $pdo = $this->db->pdo();
+        $sql = "UPDATE student_results r INNER JOIN enrollments e ON e.id=r.enrollment_id SET r.status='draft', r.published_at=NULL, r.published_by=NULL WHERE e.class_id=:class AND r.term_id=:term AND r.status='published'";
+        $params = ["class" => $classId, "term" => $termId];
+        if ($subject) {
+            $sql .= " AND r.subject=:subject";
+            $params["subject"] = $subject;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $count = $stmt->rowCount();
+        $this->audit->record($auth["id"], "UNPUBLISH", "student_results", $classId, null, ["classId" => $classId, "termId" => $termId, "subject" => $subject, "reopenedCount" => $count, "reason" => $reason]);
+        return ["reopenedCount" => $count];
+    }
+
+    public function classReportSheets(array $auth, string $classId, array $query): array
+    {
+        $termId = trim((string)($query["term_id"] ?? ""));
+        if (!$termId) throw new RuntimeException("term_id query parameter is required.");
+        $pdo = $this->db->pdo();
+
+        $stmt = $pdo->prepare("SELECT c.id AS class_id, c.class_name, c.class_level, c.academic_year,
+                s.id AS school_id, s.school_name, s.school_id AS school_code, s.school_logo,
+                w.name AS ward_name, l.name AS lga_name, st.name AS state_name,
+                ct.name AS class_teacher_name, hm.name AS headmaster_name
+                FROM school_classes c
+                INNER JOIN schools s ON s.id=c.school_id
+                INNER JOIN wards w ON w.id=s.ward_id
+                INNER JOIN lgas l ON l.id=w.lga_id
+                INNER JOIN states st ON st.id=l.state_id
+                LEFT JOIN users ct ON ct.id=c.teacher_id
+                LEFT JOIN users hm ON hm.id=s.headmaster_user_id
+                WHERE c.id=:class");
+        $stmt->execute(["class" => $classId]);
+        $classInfo = $stmt->fetch() ?: throw new RuntimeException("Class not found.");
+
+        if ($auth["role"] === "headmaster" && ($auth["assigned_scope_type"] ?? "") === "school" && ($auth["assigned_scope_id"] ?? "") !== $classInfo["school_id"]) {
+            throw new RuntimeException("Class is outside your assigned school.");
+        }
+
+        $tStmt = $pdo->prepare("SELECT t.id AS term_id, t.term_name, t.academic_year, t.start_date, t.end_date, t.status AS term_status, a.session_name
+                FROM terms t INNER JOIN academic_sessions a ON a.id=t.session_id WHERE t.id=:term");
+        $tStmt->execute(["term" => $termId]);
+        $termInfo = $tStmt->fetch() ?: throw new RuntimeException("Term not found.");
+
+        $sStmt = $pdo->prepare("SELECT e.id AS enrollment_id, e.enrollment_date, e.enrollment_status,
+                c.id AS child_id, c.child_unique_id, c.attendance_qr_token, c.first_name, c.last_name, c.gender,
+                c.date_of_birth, c.estimated_age, c.photo_url, c.guardian_phone,
+                h.household_code, h.father_name, h.mother_name, h.phone_number AS household_phone
+                FROM enrollments e
+                INNER JOIN children c ON c.id=e.child_id
+                LEFT JOIN households h ON h.id=c.household_id
+                WHERE e.class_id=:class AND e.enrollment_status='active'
+                ORDER BY c.first_name, c.last_name");
+        $sStmt->execute(["class" => $classId]);
+        $students = $sStmt->fetchAll();
+
+        $subStmt = $pdo->prepare("SELECT s.id, s.subject_name, s.subject_code FROM subjects s INNER JOIN class_subjects cs ON cs.subject_id=s.id WHERE cs.class_id=:class ORDER BY s.subject_name");
+        $subStmt->execute(["class" => $classId]);
+        $subjects = $subStmt->fetchAll();
+
+        $rStmt = $pdo->prepare("SELECT r.*, e.id AS enrollment_id, e.child_id, u.name AS recorded_by_name
+                FROM student_results r
+                INNER JOIN enrollments e ON e.id=r.enrollment_id
+                LEFT JOIN users u ON u.id=r.recorded_by
+                WHERE e.class_id=:class AND r.term_id=:term");
+        $rStmt->execute(["class" => $classId, "term" => $termId]);
+        $rawResults = $rStmt->fetchAll();
+
+        $subjectStats = [];
+        foreach ($subjects as $sub) {
+            $name = $sub["subject_name"];
+            $subjectScores = [];
+            foreach ($rawResults as $r) {
+                if ($r["subject"] === $name) {
+                    $subjectScores[] = (float)$r["score"];
+                }
+            }
+            $count = count($subjectScores);
+            $subjectStats[$name] = [
+                "count" => $count,
+                "min" => $count > 0 ? min($subjectScores) : null,
+                "max" => $count > 0 ? max($subjectScores) : null,
+                "avg" => $count > 0 ? round(array_sum($subjectScores) / $count, 1) : null,
+            ];
+        }
+
+        $attStmt = $pdo->prepare("SELECT child_id, attendance_status, COUNT(*) as cnt FROM attendance WHERE class_id=:class AND date >= :start AND date <= :end GROUP BY child_id, attendance_status");
+        $attStmt->execute(["class" => $classId, "start" => $termInfo["start_date"], "end" => $termInfo["end_date"]]);
+        $attRows = $attStmt->fetchAll();
+        $attByChild = [];
+        foreach ($attRows as $ar) {
+            $cid = $ar["child_id"];
+            if (!isset($attByChild[$cid])) $attByChild[$cid] = ["present" => 0, "late" => 0, "excused" => 0, "total" => 0];
+            $st = $ar["attendance_status"];
+            $cnt = (int)$ar["cnt"];
+            if (isset($attByChild[$cid][$st])) $attByChild[$cid][$st] += $cnt;
+            $attByChild[$cid]["total"] += $cnt;
+        }
+
+        $btStmt = $pdo->prepare("SELECT b.*, e.child_id FROM behavioral_trackers b INNER JOIN enrollments e ON e.id=b.enrollment_id WHERE e.class_id=:class AND b.term_id=:term");
+        $btStmt->execute(["class" => $classId, "term" => $termId]);
+        $btRows = $btStmt->fetchAll();
+        $behaviorsByChild = [];
+        foreach ($btRows as $b) {
+            $behaviorsByChild[$b["child_id"]][] = $b;
+        }
+
+        $resultsByEnrollment = [];
+        foreach ($rawResults as $r) {
+            $resultsByEnrollment[$r["enrollment_id"]][] = $r;
+        }
+
+        $compiledStudents = [];
+        foreach ($students as $stu) {
+            $enrId = $stu["enrollment_id"];
+            $stuResults = $resultsByEnrollment[$enrId] ?? [];
+            $totalScore = 0.0;
+            $subjectCount = count($stuResults);
+
+            $decoratedResults = [];
+            foreach ($stuResults as $resRow) {
+                $totalScore += (float)$resRow["score"];
+                $subName = $resRow["subject"];
+                $st = $subjectStats[$subName] ?? ["min" => null, "max" => null, "avg" => null];
+                $decoratedResults[] = array_merge($resRow, [
+                    "class_min" => $st["min"],
+                    "class_max" => $st["max"],
+                    "class_avg" => $st["avg"],
+                ]);
+            }
+
+            $avgScore = $subjectCount > 0 ? round($totalScore / $subjectCount, 2) : 0.0;
+            $overallGrade = self::calculateGrade($avgScore);
+
+            $attData = $attByChild[$stu["child_id"]] ?? ["present" => 0, "late" => 0, "excused" => 0, "total" => 0];
+            $attRate = $attData["total"] > 0 ? round(($attData["present"] / $attData["total"]) * 100, 1) : 100.0;
+
+            $hasPublished = count(array_filter($stuResults, fn($x) => ($x["status"] ?? "") === "published")) > 0;
+            $hasSubmitted = count(array_filter($stuResults, fn($x) => ($x["status"] ?? "") === "submitted")) > 0;
+            $reportStatus = $hasPublished ? "published" : ($hasSubmitted ? "submitted" : "draft");
+
+            $compiledStudents[] = [
+                "student" => $stu,
+                "enrollmentId" => $enrId,
+                "results" => $decoratedResults,
+                "behaviors" => $behaviorsByChild[$stu["child_id"]] ?? [],
+                "attendance" => array_merge($attData, ["rate" => $attRate]),
+                "summary" => [
+                    "totalScore" => round($totalScore, 1),
+                    "maxObtainable" => $subjectCount * 100,
+                    "subjectCount" => $subjectCount,
+                    "averageScore" => $avgScore,
+                    "overallGrade" => $overallGrade,
+                    "decision" => $avgScore >= 40.0 ? "PASSED" : "NEEDS COUNSELING",
+                    "status" => $reportStatus,
+                ]
+            ];
+        }
+
+        usort($compiledStudents, fn($a, $b) => $b["summary"]["averageScore"] <=> $a["summary"]["averageScore"]);
+        $totalCount = count($compiledStudents);
+        foreach ($compiledStudents as $index => &$item) {
+            $rank = $index + 1;
+            $suffix = match($rank % 10) {
+                1 => $rank % 100 === 11 ? "th" : "st",
+                2 => $rank % 100 === 12 ? "th" : "nd",
+                3 => $rank % 100 === 13 ? "th" : "rd",
+                default => "th"
+            };
+            $item["summary"]["rank"] = $rank;
+            $item["summary"]["positionText"] = "{$rank}{$suffix} of {$totalCount}";
+        }
+        unset($item);
+
+        return [
+            "class" => $classInfo,
+            "term" => $termInfo,
+            "subjects" => $subjects,
+            "subjectStats" => $subjectStats,
+            "students" => $compiledStudents,
+        ];
+    }
+
+    public function enrollmentReportSheet(array $auth, string $enrollmentId, array $query): array
+    {
+        $termId = trim((string)($query["term_id"] ?? ""));
+        if (!$termId) throw new RuntimeException("term_id query parameter is required.");
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare("SELECT class_id FROM enrollments WHERE id=:id");
+        $stmt->execute(["id" => $enrollmentId]);
+        $classId = $stmt->fetchColumn() ?: throw new RuntimeException("Enrollment not found.");
+
+        $classReport = $this->classReportSheets($auth, (string)$classId, ["term_id" => $termId]);
+        $studentSheet = null;
+        foreach ($classReport["students"] as $s) {
+            if ($s["enrollmentId"] === $enrollmentId) {
+                $studentSheet = $s;
+                break;
+            }
+        }
+        if (!$studentSheet) throw new RuntimeException("Student not found in this class report.");
+
+        return [
+            "class" => $classReport["class"],
+            "term" => $classReport["term"],
+            "subjects" => $classReport["subjects"],
+            "subjectStats" => $classReport["subjectStats"],
+            "sheet" => $studentSheet,
+        ];
     }
 
     public function listResults(array $auth, array $query): array
@@ -141,5 +508,51 @@ final class ProgramService
     private function referralSchoolId(array $auth):string{if(($auth['assigned_scope_type']??null)==='school')return(string)$auth['assigned_scope_id'];if(($auth['assigned_scope_type']??null)==='class'){$stmt=$this->db->pdo()->prepare('SELECT school_id FROM school_classes WHERE id=:id');$stmt->execute(['id'=>$auth['assigned_scope_id']]);return(string)($stmt->fetchColumn()?:throw new RuntimeException('Assigned class has no school.'));}throw new RuntimeException('A school or class scope is required.');}
     private function assertReferralSchool(array $auth,string $school):void{if(in_array($auth['role'],['headmaster','teacher'],true)&&$this->referralSchoolId($auth)!==$school)throw new RuntimeException('Selected school is outside your assigned scope.');}
     private function cohortOwned(array $auth,string $id):array{$record=$this->one('cohorts',$id);if(!in_array($auth['role'],['super_admin','program_admin'],true)&&$record['created_by']!==$auth['id']&&($record['delegated_user_id']??null)!==$auth['id'])throw new RuntimeException('This cohort is not owned by your programme account.');return$record;}
+    private function assertResultEditAccess(array $auth, string $classId, string $subject): void
+    {
+        if (in_array($auth['role'], ['super_admin', 'program_admin'], true)) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        if ($auth['role'] === 'headmaster') {
+            $stmt = $pdo->prepare('SELECT school_id FROM school_classes WHERE id=:class');
+            $stmt->execute(['class' => $classId]);
+            $schoolId = $stmt->fetchColumn();
+            if (!$schoolId) throw new RuntimeException('Class not found.');
+            if (($auth['assigned_scope_type'] ?? null) === 'school' && ($auth['assigned_scope_id'] ?? null) !== $schoolId) {
+                throw new RuntimeException('Selected class is outside your assigned school.');
+            }
+            return;
+        }
+        if ($auth['role'] === 'teacher') {
+            $teacherId = $auth['id'];
+            // 1. Is this teacher the assigned Class Teacher for this class?
+            $stmt = $pdo->prepare('SELECT teacher_id FROM school_classes WHERE id=:class');
+            $stmt->execute(['class' => $classId]);
+            $classTeacherId = $stmt->fetchColumn();
+            if ($classTeacherId && $classTeacherId === $teacherId) {
+                return; // Class Teacher can edit all subjects for their assigned class
+            }
+            // 2. Is this teacher the allocated Subject Teacher for this specific subject?
+            $alloc = $pdo->prepare('SELECT 1 FROM teaching_allocations ta INNER JOIN subjects s ON s.id=ta.subject_id WHERE ta.class_id=:class AND s.subject_name=:subject AND ta.teacher_id=:teacher AND ta.is_active=1');
+            $alloc->execute(['class' => $classId, 'subject' => trim($subject), 'teacher' => $teacherId]);
+            if ($alloc->fetch()) {
+                return; // Allocated subject teacher
+            }
+            throw new RuntimeException("Access denied: You are neither the Class Teacher nor the allocated Subject Teacher for '{$subject}' in this class.");
+        }
+        throw new RuntimeException('You do not have permission to manage student results.');
+    }
+
+    private function assertResultNotLocked(string $enrollmentId, string $termId, string $subject): void
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM student_results WHERE enrollment_id=:enr AND term_id=:term AND subject=:sub');
+        $stmt->execute(['enr' => $enrollmentId, 'term' => $termId, 'sub' => trim($subject)]);
+        $status = $stmt->fetchColumn();
+        if ($status === 'published') {
+            throw new RuntimeException("Results for '{$subject}' in this term have already been officially published by the Headmaster and are locked against further modification.");
+        }
+    }
+
     private function one(string $table,string $id):array { $statement=$this->db->pdo()->prepare('SELECT * FROM '.$table.' WHERE id=:id');$statement->execute(['id'=>$id]);return$statement->fetch()?:throw new RuntimeException('Record not found.'); }
 }

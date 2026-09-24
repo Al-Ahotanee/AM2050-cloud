@@ -19,6 +19,7 @@ import ChildJourney from "@/pages/ChildJourney";
 import Enrollments from "@/pages/Enrollments";
 import Attendance from "@/pages/Attendance";
 import LearningRecords from "@/pages/LearningRecords";
+import ResultManagement from "@/pages/ResultManagement";
 import Defaulters from "@/pages/Defaulters";
 import FieldOperations from "@/pages/FieldOperations";
 import ProgrammeControl from "@/pages/ProgrammeControl";
@@ -39,9 +40,6 @@ import Login from "@/pages/Login";
 
 function Router({ role, pendingSync, onQueueChange }: { role: Role; pendingSync: number; onQueueChange: () => void }) {
   const guard = (moduleKey: string, node: ReactNode) => <RequireModule role={role} moduleKey={moduleKey}>{node}</RequireModule>;
-  const learningWorkspace = ["headmaster", "teacher"].includes(role)
-    ? <LearningRecords />
-    : <div className="learning-readonly"><div className="mx-4 mt-5 rounded-md border-l-4 border-[#c88b25] bg-[#fbf7ed] px-4 py-3 text-sm text-[#7a611e] sm:mx-6 lg:mx-8">This role can review results and behavior records but cannot create or change them.</div><LearningRecords /></div>;
   return <Switch>
     <Route path="/workspace" component={() => <Dashboard role={role} pendingSync={pendingSync} />} />
     <Route path="/households" component={() => guard("households", <Households />)} />
@@ -50,7 +48,8 @@ function Router({ role, pendingSync, onQueueChange }: { role: Role; pendingSync:
     <Route path="/child-journey" component={() => guard("child-journey", <ChildJourney />)} />
     <Route path="/enrollments" component={() => guard("enrollments", <Enrollments role={role} />)} />
     <Route path="/attendance" component={() => guard("attendance", <Attendance role={role} />)} />
-    <Route path="/learning-records" component={() => guard("learning-records", learningWorkspace)} />
+    <Route path="/results" component={() => guard("learning-records", <ResultManagement />)} />
+    <Route path="/learning-records" component={() => guard("learning-records", <ResultManagement />)} />
     <Route path="/defaulters" component={() => guard("defaulters", <Defaulters />)} />
     <Route path="/surveys" component={() => guard("surveys", <FieldOperations mode="surveys" />)} />
     <Route path="/tsangaya" component={() => guard("tsangaya", <FieldOperations mode="tsangaya" />)} />

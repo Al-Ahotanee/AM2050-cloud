@@ -24,6 +24,12 @@ final class ProgramController
 
     public function results(Request $request): never { $this->paginated($request, fn() => $this->service->listResults($this->allow($request, self::EDUCATION_ROLES), $request->query)); }
     public function result(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->results($actor, $request->body()), 201); }
+    public function resultsBatch(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->resultsBatch($actor, $request->body()), 201); }
+    public function submitResults(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->submitResults($actor, $request->body())); }
+    public function publishResults(Request $request): never { $actor = $this->allow($request, ['headmaster', 'super_admin', 'program_admin']); Response::success($this->service->publishResults($actor, $request->body())); }
+    public function unpublishResults(Request $request): never { $actor = $this->allow($request, ['headmaster', 'super_admin', 'program_admin']); Response::success($this->service->unpublishResults($actor, $request->body())); }
+    public function classReportSheets(Request $request, array $params): never { $actor = $this->allow($request, self::EDUCATION_ROLES); Response::success($this->service->classReportSheets($actor, $params['id'], $request->query)); }
+    public function enrollmentReportSheet(Request $request, array $params): never { $actor = $this->allow($request, self::EDUCATION_ROLES); Response::success($this->service->enrollmentReportSheet($actor, $params['id'], $request->query)); }
     public function behaviors(Request $request): never { $this->paginated($request, fn() => $this->service->listBehavior($this->allow($request, self::EDUCATION_ROLES), $request->query)); }
     public function behavior(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->behavior($actor, $request->body()), 201); }
     public function defaulterFollowup(Request $request,array $params): never { $actor=$this->allow($request,self::EDUCATION_ROLES);Response::success($this->service->defaulterFollowup($actor,$params['id'],$request->body()),201); }

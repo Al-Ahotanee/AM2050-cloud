@@ -33,7 +33,7 @@ export const modules: ModuleLink[] = [
   { key: "sessions", label: "Academic sessions", path: "/sessions", icon: CalendarRange, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor", "headmaster"] },
   { key: "enrollments", label: "Enrollment", path: "/enrollments", icon: BookOpenCheck, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor", "headmaster", "teacher"] },
   { key: "attendance", label: "Attendance", path: "/attendance", icon: ClipboardCheck, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor", "headmaster", "teacher"] },
-  { key: "learning-records", label: "Results & behavior", path: "/learning-records", icon: GraduationCap, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor", "headmaster", "teacher"] },
+  { key: "learning-records", label: "Results & Report Sheets", path: "/results", icon: GraduationCap, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor", "headmaster", "teacher"] },
   { key: "defaulters", label: "Defaulters", path: "/defaulters", icon: ClipboardList, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor", "headmaster", "teacher"] },
   { key: "compliance", label: "Compliance", path: "/compliance", icon: BadgeCheck, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor"] },
   { key: "incentives", label: "Incentives", path: "/incentives", icon: Banknote, roles: ["super_admin", "program_admin", "lga_supervisor", "ward_supervisor"] },
