@@ -425,12 +425,12 @@ export function StudentIdCardModal({ isOpen, onClose, student }: Props) {
           <div>
             <div className="flex items-center gap-2">
               <span className="rounded bg-[#eff5f1] px-2 py-0.5 font-mono text-xs font-bold text-[#167a4c]">
-                CR80 PVC FORMAT
+                CR80 STANDARD
               </span>
               <span className="text-xs font-semibold text-[#57707f]">85.6mm × 54.0mm Standard</span>
             </div>
             <h2 className="mt-1 font-display text-lg font-bold text-[#123148]">
-              Biometric PVC Student ID Card
+              Official Student ID Card
             </h2>
           </div>
           <button
@@ -495,7 +495,7 @@ export function StudentIdCardModal({ isOpen, onClose, student }: Props) {
                     AREWA MISSION 2050
                   </p>
                   <p className="text-[6.5px] font-extrabold text-[#167a4c]">
-                    ZERO OUT-OF-SCHOOL BY 2050
+                    BASIC EDUCATION IDENTITY
                   </p>
                 </div>
               </div>
@@ -514,7 +514,7 @@ export function StudentIdCardModal({ isOpen, onClose, student }: Props) {
                     <div className="text-center p-1">
                       <ShieldCheck className="mx-auto size-6 text-[#718592]" />
                       <span className="block mt-1 font-mono text-[8px] font-bold text-[#718592]">
-                        VERIFIED PHOTO
+                        STUDENT PHOTO
                       </span>
                     </div>
                   )}
@@ -615,13 +615,13 @@ export function StudentIdCardModal({ isOpen, onClose, student }: Props) {
                 </div>
                 <ol className="mt-3 space-y-2 text-[9px] leading-relaxed text-[#334d5c]">
                   <li>
-                    <strong>1. Official Credential:</strong> This biometric card is the official property of the Universal Basic Education Board & AM2050 Initiative. Valid across all accredited public and Tsangaya learning centres.
+                    <strong>1. Official Credential:</strong> This card is the official property of the Universal Basic Education Board & AM2050 Initiative. Valid across all accredited public and Tsangaya learning centres.
                   </li>
                   <li>
-                    <strong>2. CCT Stipend Trigger:</strong> Present this card daily. Morning biometric QR roll-call triggers verified monthly Conditional Cash Transfer (CCT) stipends to the student's registered household.
+                    <strong>2. Attendance & Verification:</strong> Present this card daily. Morning QR roll-call confirms attendance and qualifies eligible households for designated educational support and stipends.
                   </li>
                   <li>
-                    <strong>3. Safe Custody:</strong> Keep clean and unbent. Report lost or damaged cards immediately to your community Headmaster or SUBEB Field Enumerator.
+                    <strong>3. Safe Custody:</strong> Keep clean and unbent. Report lost or damaged cards immediately to your community Headmaster or SUBEB Field Officer.
                   </li>
                 </ol>
               </div>
@@ -662,7 +662,7 @@ export function StudentIdCardModal({ isOpen, onClose, student }: Props) {
               className="action-press inline-flex items-center gap-2 rounded-lg bg-[#167a4c] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[#12643e]"
             >
               <Printer size={15} />
-              Print PVC Card (85.6mm × 54mm)
+              Print Student ID Card
             </button>
           </div>
         </div>

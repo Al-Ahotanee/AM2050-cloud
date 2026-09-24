@@ -237,7 +237,7 @@ export default function Households() {
       <section className="mx-auto max-w-6xl">
         <header className="flex justify-between border-b pb-5">
           <div>
-            <p className="coordinate-label">FIELD REGISTRY / HOUSEHOLDS</p>
+            <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-wider text-[#167a4c]">Community Records</p>
             <h1 className="font-display text-3xl font-semibold">Household register</h1>
           </div>
           <button onClick={create} className="action-press rounded bg-[#167a4c] px-4 py-2 text-white">
@@ -254,14 +254,14 @@ export default function Households() {
         </div>
         {tab === "form" ? (
           <form onSubmit={save} className="mt-5 border-t-4 border-[#167a4c] bg-white p-6">
-            <p className="coordinate-label">AM2050 / Formal household record</p>
+            <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-wider text-[#167a4c]">Formal Household Record</p>
             <h2 className="font-display text-xl">{editing ? "Edit household registration" : "Household registration form"}</h2>
             <p className="mt-1 text-sm text-[#57707f]">Complete this record before registering linked children.</p>
-            <div className="mt-5 grid gap-5 sm:grid-cols-[11rem_1fr]">
-              <div className="flex flex-col items-center">
+            <div className="mt-5 flex flex-col gap-6 md:flex-row md:items-start">
+              <div className="w-full sm:w-48 shrink-0 flex flex-col items-center">
                 <div
                   onClick={() => setCameraOpen(true)}
-                  className="relative grid h-48 w-full cursor-pointer place-items-center overflow-hidden rounded-md border-2 border-dashed border-[#b9c9c0] bg-[#f8faf9] text-center transition hover:border-[#167a4c]"
+                  className="group relative flex aspect-[3/4] w-40 sm:w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-dashed border-[#b9c9c0] bg-[#f8faf9] transition hover:border-[#167a4c] hover:bg-[#f0f6f2]"
                 >
                   {form.photoUrl ? (
                     <div className="relative h-full w-full">
@@ -270,20 +270,17 @@ export default function Households() {
                         alt="Household representative"
                         className="h-full w-full object-cover"
                       />
-                      <div className="absolute inset-x-0 bottom-0 bg-[#123148]/85 py-1 text-center font-mono text-[9px] font-semibold text-white backdrop-blur-xs">
-                        VERIFIED REPRESENTATIVE
+                      <div className="absolute inset-x-0 bottom-0 bg-[#123148]/80 py-1.5 text-center text-[10px] font-medium text-white backdrop-blur-xs">
+                        Change Photo
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center p-3 text-xs text-[#57707f]">
-                      <div className="grid size-10 place-items-center rounded-full bg-[#167a4c]/10 text-[#167a4c]">
-                        <Camera size={20} />
+                    <div className="flex flex-col items-center p-4 text-center">
+                      <div className="grid size-12 place-items-center rounded-full bg-[#167a4c]/10 text-[#167a4c] transition group-hover:scale-105">
+                        <Camera size={22} />
                       </div>
-                      <span className="mt-2 font-medium text-[#123148]">Representative Photo</span>
-                      <span className="mt-0.5 text-[11px] text-[#57707f]">3:4 Biometric Oval</span>
-                      <span className="mt-2 rounded bg-[#167a4c] px-2.5 py-1 font-mono text-[10px] font-semibold text-white shadow-xs">
-                        Open Viewfinder
-                      </span>
+                      <span className="mt-3 text-xs font-semibold text-[#123148]">Representative Photo</span>
+                      <span className="mt-1 text-[11px] text-[#57707f]">Take photo or upload</span>
                     </div>
                   )}
                 </div>
@@ -291,13 +288,13 @@ export default function Households() {
                   <button
                     type="button"
                     onClick={() => setCameraOpen(true)}
-                    className="mt-1.5 text-xs font-semibold text-[#0e5a38] hover:underline"
+                    className="mt-2 text-xs font-semibold text-[#0e5a38] hover:underline"
                   >
                     Change / Retake Photo
                   </button>
                 )}
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex-1 grid gap-3 sm:grid-cols-2">
                 <Field label="Father / primary contact">
                   <input className="field-input" value={form.fatherName} onChange={(e) => set("fatherName", e.target.value)} />
                 </Field>

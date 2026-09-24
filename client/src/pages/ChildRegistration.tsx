@@ -304,7 +304,7 @@ export default function ChildRegistration() {
           </Link>
           <div className="mt-5 flex justify-between gap-4">
             <div>
-              <p className="coordinate-label">AREWA MISSION 2050 · OFFICIAL REGISTRATION FORM</p>
+              <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-wider text-[#167a4c]">Official Registration Form</p>
               <h1 className="mt-1 font-display text-3xl font-semibold">Child registration</h1>
               <p className="mt-1 text-sm italic text-[#167a4c]">Every child counted. Every child learning.</p>
             </div>
@@ -317,31 +317,28 @@ export default function ChildRegistration() {
         </header>
         <div className="space-y-6 px-5 py-7 sm:px-9">
           <Section code="A" title="Child identity and photograph">
-            <div className="grid gap-5 sm:grid-cols-[11rem_1fr]">
-              <div className="flex flex-col items-center">
+            <div className="flex flex-col gap-6 md:flex-row md:items-start">
+              <div className="w-full sm:w-48 shrink-0 flex flex-col items-center">
                 <div
                   onClick={() => setCameraOpen(true)}
-                  className={`relative grid h-48 w-full cursor-pointer place-items-center overflow-hidden rounded-md border-2 border-dashed text-center transition hover:border-[#167a4c] ${
+                  className={`group relative flex aspect-[3/4] w-40 sm:w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-dashed transition hover:border-[#167a4c] hover:bg-[#f0f6f2] ${
                     errors.photoUrl ? "border-[#ae3f32] bg-[#fdf4f4]" : "border-[#b9c9c0] bg-[#f8faf9]"
                   }`}
                 >
                   {form.photoUrl ? (
                     <div className="relative h-full w-full">
                       <img src={form.photoUrl} alt="Child preview" className="h-full w-full object-cover" />
-                      <div className="absolute inset-x-0 bottom-0 bg-[#123148]/85 py-1 text-center font-mono text-[9px] font-semibold text-white backdrop-blur-xs">
-                        VERIFIED 3:4 PASSPORT
+                      <div className="absolute inset-x-0 bottom-0 bg-[#123148]/80 py-1.5 text-center text-[10px] font-medium text-white backdrop-blur-xs">
+                        Change Photo
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center p-3 text-xs text-[#57707f]">
-                      <div className="grid size-10 place-items-center rounded-full bg-[#167a4c]/10 text-[#167a4c]">
-                        <Camera size={20} />
+                    <div className="flex flex-col items-center p-4 text-center">
+                      <div className="grid size-12 place-items-center rounded-full bg-[#167a4c]/10 text-[#167a4c] transition group-hover:scale-105">
+                        <Camera size={22} />
                       </div>
-                      <span className="mt-2 font-medium text-[#123148]">Required Passport</span>
-                      <span className="mt-0.5 text-[11px] text-[#57707f]">3:4 Biometric Oval</span>
-                      <span className="mt-2 rounded bg-[#167a4c] px-2.5 py-1 font-mono text-[10px] font-semibold text-white shadow-xs">
-                        Open Viewfinder
-                      </span>
+                      <span className="mt-3 text-xs font-semibold text-[#123148]">Student Photo</span>
+                      <span className="mt-1 text-[11px] text-[#57707f]">Take photo or upload</span>
                     </div>
                   )}
                 </div>
@@ -349,15 +346,15 @@ export default function ChildRegistration() {
                   <button
                     type="button"
                     onClick={() => setCameraOpen(true)}
-                    className="mt-1.5 text-xs font-semibold text-[#0e5a38] hover:underline"
+                    className="mt-2 text-xs font-semibold text-[#0e5a38] hover:underline"
                   >
                     Change / Retake Photo
                   </button>
                 )}
-                {errors.photoUrl && <span className="mt-1 text-xs font-semibold text-[#ae3f32]">{errors.photoUrl}</span>}
+                {errors.photoUrl && <span className="mt-1.5 text-center text-xs font-semibold text-[#ae3f32]">{errors.photoUrl}</span>}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="flex-1 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <Field label="First name" required error={errors.firstName}>
                   <input
                     className="field-input"

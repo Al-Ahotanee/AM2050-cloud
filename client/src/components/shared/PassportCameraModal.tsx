@@ -217,7 +217,7 @@ export function PassportCameraModal({
         {/* Header */}
         <header className="flex items-start justify-between border-b border-[#d8e0da] bg-[#fbfaf6] p-4 sm:p-5">
           <div>
-            <p className="coordinate-label text-[#167a4c]">BIOMETRIC VERIFICATION</p>
+            <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-wider text-[#167a4c]">Photo Verification</p>
             <h2 className="mt-1 font-display text-lg font-semibold text-[#123148]">{title}</h2>
             <p className="mt-1 text-xs text-[#57707f]">{subtitle}</p>
           </div>
@@ -244,7 +244,7 @@ export function PassportCameraModal({
               }`}
             >
               <Camera size={15} />
-              Live Viewfinder
+              Take Photo
             </button>
             <button
               type="button"
@@ -256,7 +256,7 @@ export function PassportCameraModal({
               }`}
             >
               <Upload size={15} />
-              Upload Photo File
+              Upload Photo
             </button>
           </div>
         )}
@@ -266,14 +266,14 @@ export function PassportCameraModal({
           {capturedPreview ? (
             /* Review captured photo */
             <div className="flex flex-col items-center">
-              <div className="relative aspect-[3/4] w-64 overflow-hidden border-2 border-[#167a4c] bg-[#123148] shadow-md">
+              <div className="relative aspect-[3/4] w-64 overflow-hidden border-2 border-[#167a4c] bg-[#123148] shadow-md rounded-md">
                 <img src={capturedPreview} alt="Captured preview" className="h-full w-full object-cover" />
-                <span className="absolute bottom-2 left-2 rounded bg-[#167a4c]/90 px-2 py-1 font-mono text-[0.6rem] font-semibold text-white">
-                  3:4 PASSPORT FORMAT
+                <span className="absolute bottom-2 left-2 rounded bg-[#167a4c]/90 px-2 py-1 text-[0.65rem] font-medium text-white">
+                  Passport Photo
                 </span>
               </div>
               <p className="mt-3 text-center text-xs text-[#57707f]">
-                Standard 3:4 passport crop formatted. Ready for enrollment records and Cloudinary CDN storage.
+                Photo confirmed. Ready for official student registration record.
               </p>
               <div className="mt-5 flex w-full gap-3">
                 <button
@@ -370,7 +370,7 @@ export function PassportCameraModal({
                     {/* Viewfinder badges */}
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-[0.62rem] font-medium text-white backdrop-blur-sm">
                       <span className="h-2 w-2 rounded-full bg-[#167a4c] animate-pulse" />
-                      LIVE PASSPORT VIEWFINDER
+                      Camera Active
                     </div>
 
                     <button
@@ -385,7 +385,7 @@ export function PassportCameraModal({
                   </div>
 
                   <p className="mt-3 text-center text-xs text-[#57707f]">
-                    Position face within the oval guide line with shoulders visible.
+                    Position face within the guide frame with shoulders visible.
                   </p>
 
                   {/* Shutter Button */}
@@ -411,7 +411,7 @@ export function PassportCameraModal({
                   <Upload className="mx-auto text-[#167a4c]" size={36} />
                   <p className="mt-3 text-sm font-semibold text-[#123148]">Choose photo from device</p>
                   <p className="mt-1 text-xs text-[#57707f]">
-                    JPG, PNG, or WebP. The photo will be automatically framed to a 3:4 verified passport aspect ratio.
+                    JPG, PNG, or WebP up to 5MB. Photo will be formatted automatically.
                   </p>
                 </div>
                 <input type="file" accept="image/*" className="sr-only" onChange={handleFileUpload} />

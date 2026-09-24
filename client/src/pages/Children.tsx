@@ -132,7 +132,7 @@ export default function Children() {
           <IconButton label="View child registration form" onClick={() => setPreview(r)}>
             <Eye size={16} />
           </IconButton>
-          <IconButton label="Print Biometric PVC Student ID Card" onClick={() => setCardChild(r)}>
+          <IconButton label="Print Student ID Card" onClick={() => setCardChild(r)}>
             <CreditCard size={16} />
           </IconButton>
           {!schoolRole && user && guardianConfirmRoles.has(user.role) && (
@@ -156,8 +156,8 @@ export default function Children() {
       <section className="mx-auto max-w-[1440px]">
         <header className="flex flex-col justify-between gap-4 border-b border-[#cfd9d2] pb-5 lg:flex-row lg:items-end">
           <div>
-            <p className="coordinate-label">CHILD REGISTRATION</p>
-            <h1 className="mt-1 font-display text-3xl font-semibold">Child register</h1>
+            <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-wider text-[#167a4c]">Child Registry</p>
+            <h1 className="mt-1 font-display text-3xl font-semibold">Child Directory</h1>
             <p className="mt-2 text-[#57707f]">
               Register children, review formal registration records, and confirm guardian links. Student ID cards and QR
               tokens are available after enrollment.
@@ -186,7 +186,7 @@ export default function Children() {
           <button
             aria-label="Refresh child register"
             onClick={() => void load()}
-            className="action-press grid size-11 place-items-center border border-[#b9c9c0] bg-white"
+            className="action-press grid size-11 place-items-center rounded-md border border-[#b9c9c0] bg-white text-[#234c64]"
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>

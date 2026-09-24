@@ -35,7 +35,7 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
     <aside className="flex h-full w-[17.5rem] shrink-0 flex-col bg-[#123148] text-[#f7f4ec] shadow-[12px_0_36px_rgba(18,49,72,0.12)]">
       <div className="flex h-[4.75rem] items-center justify-between border-b border-white/10 px-5">
         <Link href="/workspace" onClick={closeMobile} className="group flex items-center transition-opacity hover:opacity-95">
-          <WordmarkLogo theme="dark" size="sm" variant="horizontal" subtitleText="FIELD WORKSPACE" showTagline={false} />
+          <WordmarkLogo theme="dark" size="sm" variant="horizontal" showTagline={false} />
         </Link>
         <button
           aria-label="Close menu"
@@ -47,7 +47,7 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
       </div>
       <nav aria-label="Main navigation" className="flex-1 overflow-y-auto border-y border-white/10 px-3 py-4">
         <p className="px-2 pb-2 font-mono text-[0.59rem] font-medium uppercase tracking-[0.14em] text-[#9cc8ae]">
-          School workspace
+          Navigation
         </p>
         <div className="space-y-1">
           {accessibleModules.map((module) => {
@@ -81,7 +81,7 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
             <span className="font-mono text-[0.62rem] font-medium tracking-wide text-[#9cc8ae]">
-              AZURE CLOUD • LIVE
+              System Online
             </span>
           </div>
           <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.58rem] font-semibold text-white/70">
@@ -115,13 +115,16 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
             >
               <Menu size={20} />
             </button>
-            <Link href="/workspace" className="hidden items-center gap-3 border-r border-[#d8e0da] pr-5 xl:flex">
-              <WordmarkLogo theme="light" size="sm" variant="horizontal" showSubtitle={false} showTagline={false} />
-              <span className="rounded-full border border-[#b9dcc3] bg-[#e7f4eb] px-2.5 py-0.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-[#167a4c]">
-                National Unified Field Ledger
+            <div className="hidden lg:flex items-center gap-2.5">
+              <span className="font-display text-base font-semibold text-[#123148]">
+                {modules.find((m) => location === m.path || (m.path !== "/workspace" && location.startsWith(`${m.path}/`)))?.label || "Workspace"}
               </span>
-            </Link>
-            <div className="sm:hidden">
+              <span className="text-[#aab9b0]">/</span>
+              <span className="rounded-full border border-[#b9dcc3] bg-[#e7f4eb] px-2.5 py-0.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-[#167a4c]">
+                {roleLabels[user.role]}
+              </span>
+            </div>
+            <div className="lg:hidden">
               <WordmarkLogo theme="light" size="xs" variant="horizontal" showSubtitle={false} />
             </div>
           </div>
