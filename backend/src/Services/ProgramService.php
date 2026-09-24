@@ -237,7 +237,8 @@ final class ProgramService
         $termInfo = $tStmt->fetch() ?: throw new RuntimeException("Term not found.");
 
         $sStmt = $pdo->prepare("SELECT e.id AS enrollment_id, e.enrollment_date, e.enrollment_status,
-                c.id AS child_id, c.child_unique_id, c.attendance_qr_token, c.first_name, c.last_name, c.gender,
+                c.id AS id, c.id AS child_id, c.child_unique_id, c.child_unique_id AS nin, c.child_unique_id AS am2050_id,
+                c.attendance_qr_token, c.first_name, c.last_name, c.gender,
                 c.date_of_birth, c.estimated_age, c.photo_url, c.guardian_phone,
                 h.household_code, h.father_name, h.mother_name, h.phone_number AS household_phone
                 FROM enrollments e
@@ -366,10 +367,13 @@ final class ProgramService
         }
         unset($item);
 
+        $subjectNames = array_values(array_unique(array_filter(array_map(fn($s) => is_array($s) ? ($s["subject_name"] ?? "") : (string)$s, $subjects))));
+
         return [
             "class" => $classInfo,
             "term" => $termInfo,
-            "subjects" => $subjects,
+            "subjects" => $subjectNames,
+            "registeredSubjects" => $subjects,
             "subjectStats" => $subjectStats,
             "students" => $compiledStudents,
         ];

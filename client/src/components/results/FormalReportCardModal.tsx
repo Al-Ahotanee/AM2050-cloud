@@ -239,7 +239,7 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
                     <div>
                       <span className="text-slate-500 font-medium block text-[10px] uppercase">AM2050 Learner ID / NIN</span>
                       <span className="font-mono font-bold text-emerald-900">
-                        {stu.nin || stu.am2050_id || `NG-STU-${stu.id.slice(-6).toUpperCase()}`}
+                        {(stu as any)?.child_unique_id || stu.nin || stu.am2050_id || (stu.id ? `NG-STU-${stu.id.slice(-6).toUpperCase()}` : stu.child_id ? `NG-STU-${stu.child_id.slice(-6).toUpperCase()}` : "NG-STU")}
                       </span>
                     </div>
 
@@ -504,7 +504,7 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
                       <span>Next Term Resumption Date: <strong className="text-slate-900 font-semibold">{termInfo?.nextTermBegins || 'Monday, 11th January 2027'}</strong></span>
                     </div>
                     <div>
-                      <span>Digital Verification Hash: <strong className="font-mono text-slate-700">{stu.id.slice(0, 10).toUpperCase()}-VERIFIED-AM2050</strong></span>
+                      <span>Digital Verification Hash: <strong className="font-mono text-slate-700">{(stu.id || stu.child_id || sheet.enrollmentId || "AM2050").slice(0, 10).toUpperCase()}-VERIFIED-AM2050</strong></span>
                     </div>
                     <div>
                       <span>Printed via AM2050 National Education Cloud</span>

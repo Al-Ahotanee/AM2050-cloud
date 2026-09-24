@@ -252,11 +252,14 @@ export default function ResultManagement() {
       const comments = existing?.notes || "";
       const status = existing?.status || "draft";
 
+      const stuId = st.student.id || st.student.child_id || st.enrollmentId || "";
+      const rawId = (st.student as any)?.child_unique_id || st.student.nin || st.student.am2050_id || (stuId ? stuId.slice(-6).toUpperCase() : "STUDENT");
+
       return {
         enrollmentId: st.enrollmentId,
-        childId: st.student.child_id || st.student.id,
-        studentName: `${st.student.first_name} ${st.student.last_name}`,
-        childUniqueId: st.student.nin || st.student.am2050_id || st.student.id.slice(-6).toUpperCase(),
+        childId: stuId,
+        studentName: `${st.student.first_name || ""} ${st.student.last_name || ""}`.trim() || "Student",
+        childUniqueId: rawId,
         gender: st.student.gender || "-",
         caScore: ca,
         examScore: exam,
@@ -1067,7 +1070,7 @@ export default function ResultManagement() {
 
                           {/* Registry ID */}
                           <td className="py-3 px-3 font-mono text-[11px] text-slate-600">
-                            {st.student.nin || st.student.am2050_id || `NG-${st.student.id.slice(-6).toUpperCase()}`}
+                            {(st.student as any)?.child_unique_id || st.student.nin || st.student.am2050_id || (st.student.id ? `NG-${st.student.id.slice(-6).toUpperCase()}` : st.student.child_id ? `NG-${st.student.child_id.slice(-6).toUpperCase()}` : "NG-STUDENT")}
                           </td>
 
                           {/* Gender */}
@@ -1180,11 +1183,14 @@ export default function ResultManagement() {
                     <th className="py-3 px-3 w-10 text-center">#</th>
                     <th className="py-3 px-4">Learner Name</th>
                     <th className="py-3 px-3">Unique ID</th>
-                    {classReport?.subjects.map((s) => (
-                      <th key={s} className="py-3 px-2 text-center border-l border-slate-200">
-                        {s.slice(0, 4)}
-                      </th>
-                    ))}
+                    {classReport?.subjects.map((s, sIdx) => {
+                      const subName = typeof s === "string" ? s : (s as any)?.subject_name || String(s || "");
+                      return (
+                        <th key={subName || sIdx} className="py-3 px-2 text-center border-l border-slate-200">
+                          {subName ? subName.slice(0, 4) : "SUB"}
+                        </th>
+                      );
+                    })}
                     <th className="py-3 px-3 text-center border-l border-slate-300 bg-slate-200/50">Total</th>
                     <th className="py-3 px-3 text-center bg-slate-200/50">Average</th>
                     <th className="py-3 px-3 text-center">Grade</th>
@@ -1198,13 +1204,14 @@ export default function ResultManagement() {
                         {st.student.first_name} {st.student.last_name}
                       </td>
                       <td className="py-2 px-3 font-mono text-slate-500 text-[10px]">
-                        {st.student.nin || st.student.id.slice(-6).toUpperCase()}
+                        {(st.student as any)?.child_unique_id || st.student.nin || st.student.am2050_id || (st.student.id ? st.student.id.slice(-6).toUpperCase() : st.student.child_id ? st.student.child_id.slice(-6).toUpperCase() : "STUDENT")}
                       </td>
 
-                      {classReport.subjects.map((sub) => {
-                        const r = st.results.find((item) => item.subject.toLowerCase() === sub.toLowerCase());
+                      {classReport.subjects.map((sub, sIdx) => {
+                        const subName = typeof sub === "string" ? sub : (sub as any)?.subject_name || String(sub || "");
+                        const r = st.results.find((item) => item.subject && item.subject.toLowerCase() === subName.toLowerCase());
                         return (
-                          <td key={sub} className="py-2 px-2 text-center font-mono text-slate-700 border-l border-slate-200">
+                          <td key={subName || sIdx} className="py-2 px-2 text-center font-mono text-slate-700 border-l border-slate-200">
                             {r ? r.score : "-"}
                           </td>
                         );
