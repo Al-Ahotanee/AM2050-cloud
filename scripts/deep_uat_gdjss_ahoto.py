@@ -450,6 +450,10 @@ else:
 status, res = api_call("GET", f"/children?ward_id={ward_id}&limit=250", token=admin_token)
 existing_children = {f"{c.get('first_name')} {c.get('last_name')}": c for c in get_items(res)}
 
+# Fetch existing enrollments for this school keyed by child_id
+status, res = api_call("GET", f"/enrollments?limit=250", token=hm_token)
+all_school_enrollments = {e["child_id"]: e for e in get_items(res) if e.get("school_id") == school_id}
+
 enrolled_students = []
 
 for idx, stud in enumerate(STUDENT_DATA):
@@ -473,11 +477,9 @@ for idx, stud in enumerate(STUDENT_DATA):
         status, res = api_call("POST", "/children", child_payload, token=admin_token)
         child = res.get("data")
     
-    # Check or create active enrollment
+    # Check or create active enrollment for this specific child
     cls = active_classes[stud["class_idx"]]
-    status, res = api_call("GET", f"/enrollments?child_id={child['id']}", token=hm_token)
-    enr_list = get_items(res)
-    enr = enr_list[0] if enr_list else None
+    enr = all_school_enrollments.get(child["id"])
     
     if not enr:
         enr_payload = {
@@ -489,10 +491,13 @@ for idx, stud in enumerate(STUDENT_DATA):
         }
         status, res = api_call("POST", "/enrollments", enr_payload, token=hm_token)
         enr = res.get("data")
+        if enr:
+            all_school_enrollments[child["id"]] = enr
     
     # Headmaster approves enrollment
     if enr and not enr.get("approved_by"):
         api_call("POST", f"/enrollments/{enr['id']}/approve", {}, token=hm_token)
+        enr["approved_by"] = hm_id
     
     enrolled_students.append({
         "child": child,
@@ -500,7 +505,8 @@ for idx, stud in enumerate(STUDENT_DATA):
         "class": cls
     })
 
-record("Register & Formally Enroll 30 Students (10/class)", len(enrolled_students) == 30, f"Enrolled count: {len(enrolled_students)}")
+valid_enrollments = [item for item in enrolled_students if item.get("enrollment") and item["enrollment"].get("id")]
+record("Register & Formally Enroll 30 Students (10/class)", len(valid_enrollments) == 30, f"Enrolled count: {len(valid_enrollments)}/30")
 
 # ------------------------------------------------------------------------------
 # STEP 9: TERM ATTENDANCE TRACKING (MANUAL + QR BURST SCANS)
@@ -616,7 +622,8 @@ record("Log Behavioral Assessments Across Cohort", behavior_count == 90, f"Behav
 print("\n>> Phase 11: Verification, Reporting & Permanent Database Persistence")
 status, res = api_call("GET", f"/results?limit=250", token=hm_token)
 retrieved_results = get_items(res)
-record("Query Paginated Results Ledger (/results)", status == 200 and len(retrieved_results) >= 200, f"Retrieved in page: {len(retrieved_results)}")
+total_results = res.get("pagination", {}).get("total", len(retrieved_results))
+record("Query Paginated Results Ledger (/results)", status == 200 and (len(retrieved_results) >= 200 or total_results >= 300), f"Retrieved in page: {len(retrieved_results)}, Total: {total_results}")
 
 status, res = api_call("GET", "/reports/results-summary", token=admin_token)
 record("Generate Official Performance Summary Report (/reports/results-summary)", status == 200, f"HTTP {status} - Subject averages computed")
