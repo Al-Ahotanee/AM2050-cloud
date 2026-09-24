@@ -31,6 +31,7 @@ function isAlreadyAppliedError(Throwable $e): bool
 
 function splitSqlStatements(string $sql): array
 {
+    $sql = preg_replace('/^\xEF\xBB\xBF/', '', $sql);
     $lines = explode("\n", $sql);
     $cleanLines = [];
     foreach ($lines as $line) {
@@ -58,6 +59,7 @@ foreach ($files as $file) {
         continue;
     }
     $sql = trim((string) file_get_contents($file));
+    $sql = preg_replace('/^\xEF\xBB\xBF/', '', $sql);
     if ($sql === '') {
         continue;
     }

@@ -1,4 +1,4 @@
-﻿-- Migration 0021: Student Results Lifecycle (Draft / Submitted / Published), CA + Exam Breakdown, and Report Cards
+-- Migration 0021: Student Results Lifecycle (Draft / Submitted / Published), CA + Exam Breakdown, and Report Cards
 ALTER TABLE student_results
     ADD COLUMN ca_score DECIMAL(5,2) NULL AFTER score,
     ADD COLUMN exam_score DECIMAL(5,2) NULL AFTER ca_score,
