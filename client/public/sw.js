@@ -1,10 +1,12 @@
 /* AM2050 — High-Resilience Progressive Web App (PWA) Service Worker */
-const CACHE_NAME = 'am2050-offline-v1.3';
+const CACHE_NAME = 'am2050-offline-v1.4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/favicon.svg',
+  '/pwa-192x192.png',
+  '/pwa-512x512.png',
 ];
 
 // Pre-cache core app shell on installation

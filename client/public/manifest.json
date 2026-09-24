@@ -1,7 +1,7 @@
 {
-  "name": "AM2050 — Zero Out-of-School Children in Arewa by 2050",
+  "name": "AM2050 — Education Field Ledger",
   "short_name": "AM2050",
-  "description": "Zero Out-of-School Children in Arewa by 2050.",
+  "description": "Zero Out-of-School Children in Arewa by 2050. Unified Frontline Field and School Operations.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,7 +10,35 @@
   "background_color": "#fbfaf6",
   "theme_color": "#123148",
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ]
 }
-

@@ -1,6 +1,6 @@
 /* AM2050 — Field Ledger Modernism: Enrollment is the sole school-placement register. Formal certificates use the authorised Headmaster's stored signature and transfers select a registered destination before an exceptional typed fallback. */
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, Building2, CheckCircle2, CreditCard, Download, Eye, FileDown, GraduationCap, PenLine, Plus, RefreshCw, Search, ShieldCheck, Upload, UserRoundX, X } from "lucide-react";
+import { ArrowRightLeft, Building2, CheckCircle2, CreditCard, Download, Eye, FileDown, GraduationCap, PenLine, Plus, Printer, RefreshCw, Search, ShieldCheck, Upload, UserRoundX, X } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/api/client";
 import { LedgerColumn, LedgerTable } from "@/components/shared/LedgerTable";
@@ -9,6 +9,7 @@ import AttendanceQr from "@/components/school/AttendanceQr";
 import { LogoMark } from "@/components/brand/LogoMark";
 import { Role } from "@/lib/access";
 import { StudentIdCardModal } from "@/components/school/StudentIdCardModal";
+import { BatchStudentIdCardModal } from "@/components/school/BatchStudentIdCardModal";
 
 type Child = { id: string; child_unique_id: string; first_name: string; last_name: string; child_status: string; photo_url?: string | null; attendance_qr_token?: string };
 type School = { id: string; school_name: string };
@@ -34,6 +35,7 @@ export default function Enrollments({ role }: { role: Role }) {
   const [preview, setPreview] = useState<Enrollment | null>(null);
   const [identity, setIdentity] = useState<Enrollment | null>(null);
   const [pvcCard, setPvcCard] = useState<Enrollment | null>(null);
+  const [batchPrintOpen, setBatchPrintOpen] = useState(false);
   const [transitioning, setTransitioning] = useState<Enrollment | null>(null);
   const [query, setQuery] = useState("");
   const [filterSchool, setFilterSchool] = useState("");
@@ -137,7 +139,7 @@ export default function Enrollments({ role }: { role: Role }) {
   ];
 
   return <main className="paper-grain min-h-[calc(100vh-5.15rem)] px-4 pb-10 pt-6 sm:px-6 lg:px-8"><section className="mx-auto max-w-[1440px]">
-    <header className="flex flex-col justify-between gap-4 border-b border-[#cfd9d2] pb-5 lg:flex-row lg:items-end"><div><p className="coordinate-label">Academic Placements</p><h1 className="mt-2 font-display text-2xl font-semibold sm:text-3xl">Student Enrollments</h1><p className="mt-2 text-[#57707f]">Manage school admissions and class placements, review registration documents, and issue official student ID credentials.</p></div><div className="flex gap-2"><button onClick={() => void load()} className="action-press inline-flex gap-2 rounded-md border border-[#b9c9c0] bg-white px-4 py-2.5 text-sm font-semibold"><RefreshCw size={16} className={loading ? "animate-spin" : ""} />Refresh</button>{canManage && <button onClick={() => setShowForm(true)} className="action-press inline-flex gap-2 rounded-md bg-[#167a4c] px-4 py-2.5 text-sm font-semibold text-white"><Plus size={17} />Record enrollment</button>}</div></header>
+    <header className="flex flex-col justify-between gap-4 border-b border-[#cfd9d2] pb-5 lg:flex-row lg:items-end"><div><p className="coordinate-label">Academic Placements</p><h1 className="mt-2 font-display text-2xl font-semibold sm:text-3xl">Student Enrollments</h1><p className="mt-2 text-[#57707f]">Manage school admissions and class placements, review registration documents, and issue official student ID credentials.</p></div><div className="flex items-center gap-2.5 shrink-0"><button onClick={() => void load()} className="action-press inline-flex h-10 items-center gap-2 rounded-md border border-[#b9c9c0] bg-white px-4 text-sm font-semibold text-[#234c64] shadow-sm whitespace-nowrap hover:bg-[#eff5f1]"><RefreshCw size={16} className={loading ? "animate-spin" : ""} /><span>Refresh</span></button><button onClick={() => setBatchPrintOpen(true)} className="action-press inline-flex h-10 items-center gap-2 rounded-md border border-[#167a4c] bg-[#e7f4eb] px-4 text-sm font-semibold text-[#0e5a38] shadow-sm whitespace-nowrap hover:bg-[#d8eedf]"><Printer size={16} /><span>Print Class Batch (A4)</span></button>{canManage && <button onClick={() => setShowForm(true)} className="action-press inline-flex h-10 items-center gap-2 rounded-md bg-[#167a4c] px-4 text-sm font-semibold text-white shadow-sm whitespace-nowrap hover:bg-[#12643e]"><Plus size={17} /><span>Record enrollment</span></button>}</div></header>
     <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_minmax(14rem,.65fr)_minmax(14rem,.65fr)]"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#718592]" size={17} /><input className="field-input pl-10" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search child, school or class" /></div><select className="field-input field-select" value={filterSchool} onChange={(event) => { setFilterSchool(event.target.value); setFilterClass(""); }}><option value="">All schools</option>{schools.map((school) => <option key={school.id} value={school.id}>{school.school_name}</option>)}</select><select className="field-input field-select" value={filterClass} onChange={(event) => setFilterClass(event.target.value)} disabled={filterClassOptions.length === 0}><option value="">All classes</option>{filterClassOptions.map((schoolClass) => <option key={schoolClass.id} value={schoolClass.id}>{schoolClass.class_name} — {schoolClass.class_level}</option>)}</select></div>
     <div className="mt-4"><LedgerTable rows={rows.map((item) => ({ ...item, localId: item.id }))} columns={columns} emptyMessage={loading ? "Loading enrollment records…" : "No enrollment records match the selected filters."} /></div>
     {canTransition && <CertificateSignaturePanel signatureData={signatureData} saving={savingSignature} upload={uploadSignature} />}
@@ -164,6 +166,26 @@ export default function Enrollments({ role }: { role: Role }) {
             }
           : null
       }
+    />
+    <BatchStudentIdCardModal
+      isOpen={batchPrintOpen}
+      onClose={() => setBatchPrintOpen(false)}
+      students={rows.map((r) => ({
+        id: r.child_id,
+        childCode: r.child_unique_id,
+        firstName: r.first_name,
+        lastName: r.last_name,
+        photoUrl: r.photo_url,
+        schoolName: r.school_name,
+        className: r.class_name || r.class_level,
+        wardName: r.ward_name,
+        gender: (r as unknown as { gender?: string }).gender || null,
+        dateOfBirth: (r as unknown as { date_of_birth?: string }).date_of_birth || null,
+        estimatedAge: (r as unknown as { estimated_age?: number }).estimated_age || null,
+        attendanceToken: token(r),
+      }))}
+      defaultSchoolName={schools.find((s) => s.id === filterSchool)?.school_name}
+      defaultClassName={filterClassOptions.find((c) => c.id === filterClass)?.class_name}
     />
     {transitioning && <TransitionDialog record={transitioning} close={() => setTransitioning(null)} complete={completeTransition} />}
   </section></main>;

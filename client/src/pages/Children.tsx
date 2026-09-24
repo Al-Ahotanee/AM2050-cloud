@@ -1,12 +1,13 @@
 /* AM2050 — Field Ledger Modernism: the Child Register is the authoritative formal registration record; student identity and QR records belong only to approved enrollment. */
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { CreditCard, Eye, FileDown, Link2, Plus, RefreshCw, Search, X } from "lucide-react";
+import { CreditCard, Eye, FileDown, Link2, Plus, Printer, RefreshCw, Search, X } from "lucide-react";
 import { Link } from "wouter";
 import { toast } from "sonner";
 import { apiClient } from "@/api/client";
 import { LedgerColumn, LedgerTable } from "@/components/shared/LedgerTable";
 import { useAuth } from "@/contexts/AuthContext";
 import { StudentIdCardModal } from "@/components/school/StudentIdCardModal";
+import { BatchStudentIdCardModal } from "@/components/school/BatchStudentIdCardModal";
 type Child={id:string;child_unique_id:string;first_name:string;last_name:string;gender:string;date_of_birth?:string|null;estimated_age?:number|null;disability_status?:string|null;almajiri_status?:string|null;registration_details?:string|null;photo_url:string|null;guardian_phone:string|null;household_code:string|null;household_phone?:string|null;father_name:string|null;mother_name:string|null;ward_name?:string|null;community_name?:string|null};
 type Details={middleName?:string;guardianName?:string;educationStatus?:string;attendanceBarrier?:string;healthNote?:string;gps?:string;remarks?:string;tsangayaName?:string};
 const guardianConfirmRoles=new Set(["super_admin","program_admin","lga_supervisor","ward_supervisor","mobilizer"]);
@@ -24,6 +25,7 @@ export default function Children() {
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<Child | null>(null);
   const [cardChild, setCardChild] = useState<Child | null>(null);
+  const [batchPrintOpen, setBatchPrintOpen] = useState(false);
   const [linking, setLinking] = useState<Child | null>(null);
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
@@ -163,33 +165,40 @@ export default function Children() {
               tokens are available after enrollment.
             </p>
           </div>
-          {!schoolRole && (
-            <Link
-              href="/children/new"
-              className="action-press inline-flex items-center gap-2 rounded-md bg-[#167a4c] px-4 py-2.5 text-sm font-semibold text-white"
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              onClick={() => void load()}
+              className="action-press inline-flex h-10 items-center gap-2 rounded-md border border-[#b9c9c0] bg-white px-4 text-sm font-semibold text-[#234c64] shadow-sm whitespace-nowrap hover:bg-[#eff5f1]"
             >
-              <Plus size={17} />
-              Register child
-            </Link>
-          )}
-        </header>
-        <div className="mt-5 flex gap-3">
-          <div className="relative w-full max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#718592]" size={16} />
-            <input
-              className="field-input pl-10"
-              placeholder="Search child name, registration ID, guardian or household"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => setBatchPrintOpen(true)}
+              className="action-press inline-flex h-10 items-center gap-2 rounded-md border border-[#167a4c] bg-[#e7f4eb] px-4 text-sm font-semibold text-[#0e5a38] shadow-sm whitespace-nowrap hover:bg-[#d8eedf]"
+            >
+              <Printer size={16} />
+              <span>Print Batch (A4)</span>
+            </button>
+            {!schoolRole && (
+              <Link
+                href="/children/new"
+                className="action-press inline-flex h-10 items-center gap-2 rounded-md bg-[#167a4c] px-4 text-sm font-semibold text-white shadow-sm whitespace-nowrap hover:bg-[#12643e]"
+              >
+                <Plus size={17} />
+                <span>Register child</span>
+              </Link>
+            )}
           </div>
-          <button
-            aria-label="Refresh child register"
-            onClick={() => void load()}
-            className="action-press grid size-11 place-items-center rounded-md border border-[#b9c9c0] bg-white text-[#234c64]"
-          >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          </button>
+        </header>
+        <div className="mt-5 relative w-full max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#718592]" size={16} />
+          <input
+            className="field-input !h-10 pl-10 rounded-md"
+            placeholder="Search child name, registration ID, guardian or household"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         <div className="mt-4">
           <LedgerTable
@@ -233,6 +242,24 @@ export default function Children() {
                 }
               : null
           }
+        />
+        <BatchStudentIdCardModal
+          isOpen={batchPrintOpen}
+          onClose={() => setBatchPrintOpen(false)}
+          students={rows.map((r) => ({
+            id: r.id,
+            childCode: r.child_unique_id,
+            firstName: r.first_name,
+            middleName: parse(r).middleName,
+            lastName: r.last_name,
+            photoUrl: r.photo_url,
+            gender: r.gender,
+            dateOfBirth: r.date_of_birth,
+            estimatedAge: r.estimated_age,
+            wardName: r.ward_name,
+            schoolName: parse(r).tsangayaName,
+            attendanceToken: r.child_unique_id,
+          }))}
         />
         {linking && (
           <div className="fixed inset-0 z-50 grid overflow-y-auto bg-[#082236]/45 p-4 sm:place-items-center">

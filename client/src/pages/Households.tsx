@@ -235,14 +235,20 @@ export default function Households() {
   return (
     <main className="paper-grain min-h-[calc(100vh-5.15rem)] p-6">
       <section className="mx-auto max-w-6xl">
-        <header className="flex justify-between border-b pb-5">
+        <header className="flex flex-col gap-4 border-b border-[#cfd9d2] pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-wider text-[#167a4c]">Community Records</p>
-            <h1 className="font-display text-3xl font-semibold">Household register</h1>
+            <p className="coordinate-label">Community Records</p>
+            <h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.05em] text-[#123148]">Household register</h1>
+            <p className="mt-2 max-w-2xl text-[#57707f]">Record and review verified community household profiles, guardian identities, dwelling assessments, and family ties.</p>
           </div>
-          <button onClick={create} className="action-press rounded bg-[#167a4c] px-4 py-2 text-white">
-            <Plus size={16} className="inline" /> New household
-          </button>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button onClick={() => void load()} className="action-press inline-flex h-10 items-center gap-2 rounded-md border border-[#b9c9c0] bg-white px-4 text-sm font-semibold text-[#183a2d] shadow-sm hover:bg-[#f4f7f5] whitespace-nowrap shrink-0">
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh
+            </button>
+            <button onClick={create} className="action-press inline-flex h-10 items-center gap-2 rounded-md bg-[#167a4c] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#12643e] whitespace-nowrap shrink-0">
+              <Plus size={16} /> New household
+            </button>
+          </div>
         </header>
         <div className="mt-4 flex gap-5 border-b">
           <Tab active={tab === "form"} onClick={() => setTab("form")}>
