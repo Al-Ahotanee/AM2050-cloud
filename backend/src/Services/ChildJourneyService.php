@@ -115,9 +115,29 @@ final class ChildJourneyService
         $attendanceRate = $totalDays > 0 ? round(($attendedDays / $totalDays) * 100, 1) : 100.0;
 
         // Academic Results
-        $resCalc = $pdo->prepare("SELECT overall_average, overall_grade, position, academic_year, t.term_name FROM student_term_results tr LEFT JOIN terms t ON t.id = tr.term_id WHERE tr.child_id = :child ORDER BY tr.created_at DESC LIMIT 1");
+        $resCalc = $pdo->prepare(
+            "SELECT ROUND(AVG(sr.score), 2) AS overall_average,
+                    COUNT(DISTINCT sr.subject_id) AS subject_count,
+                    t.term_name, t.academic_year
+             FROM student_results sr
+             INNER JOIN enrollments e ON e.id = sr.enrollment_id
+             LEFT JOIN terms t ON t.id = sr.term_id
+             WHERE e.child_id = :child
+             GROUP BY sr.enrollment_id, sr.term_id, t.term_name, t.academic_year
+             ORDER BY MAX(sr.updated_at) DESC
+             LIMIT 1"
+        );
         $resCalc->execute(['child' => $childId]);
         $latestExam = $resCalc->fetch();
+        $examAvg = $latestExam ? (float)$latestExam['overall_average'] : null;
+        $examGrade = null;
+        if ($examAvg !== null) {
+            if ($examAvg >= 75) $examGrade = 'A (Distinction)';
+            elseif ($examAvg >= 65) $examGrade = 'B (Credit)';
+            elseif ($examAvg >= 50) $examGrade = 'C (Pass)';
+            elseif ($examAvg >= 40) $examGrade = 'D (Weak Pass)';
+            else $examGrade = 'F (Fail)';
+        }
 
         // Active Placement
         $enrInfo = $pdo->prepare("SELECT e.*, s.school_name, sc.class_name FROM enrollments e INNER JOIN schools s ON s.id = e.school_id LEFT JOIN school_classes sc ON sc.id = e.class_id WHERE e.child_id = :child AND e.enrollment_status = 'active' LIMIT 1");
@@ -225,43 +245,49 @@ final class ChildJourneyService
         foreach($enrollments as $row){$type='enrollment_'.($row['enrollment_status']==='active'?'confirmed':$row['enrollment_status']);$title=$row['enrollment_status']==='active'?'Enrolled at ':ucfirst($row['enrollment_status']).' from ';$this->upsert($childId,$type,$row['enrollment_date'],'enrollment',$row['id'],'enrollment:'.$row['id'],$title.$row['school_name'].($row['class_name']?' · '.$row['class_name']:'.'),['school'=>$row['school_name'],'class'=>$row['class_name'],'status'=>$row['enrollment_status']],true,$row['approved_by']);if($row['enrollment_status']==='active')$active=$row;}
         $attendance=$pdo->prepare("SELECT DATE_FORMAT(a.date,'%Y-%m-01') AS period_start,MAX(a.date) AS period_end,a.school_id,a.class_id,s.school_name,sc.class_name,COUNT(*) AS recorded_days,SUM(a.attendance_status IN ('present','late')) AS attended_days FROM attendance a INNER JOIN schools s ON s.id=a.school_id LEFT JOIN school_classes sc ON sc.id=a.class_id WHERE a.child_id=:child GROUP BY period_start,a.school_id,a.class_id,s.school_name,sc.class_name");$attendance->execute(['child'=>$childId]);foreach($attendance->fetchAll() as $row){$rate=$row['recorded_days']?(int)round(((int)$row['attended_days']/(int)$row['recorded_days'])*100):0;$this->upsert($childId,'attendance_period_summary',$row['period_end'],'attendance_period',null,'attendance:'.$row['school_id'].':'.($row['class_id']??'none').':'.$row['period_start'],'Attendance recorded: '.$rate.'% across '.$row['recorded_days'].' school days.',['rate'=>$rate,'recordedDays'=>(int)$row['recorded_days'],'school'=>$row['school_name'],'class'=>$row['class_name'],'periodStart'=>$row['period_start']],true,null);}
         
-        $termResults = $pdo->prepare('SELECT tr.*, t.term_name FROM student_term_results tr LEFT JOIN terms t ON t.id = tr.term_id WHERE tr.child_id = :child');
-        $termResults->execute(['child' => $childId]);
-        $trRows = $termResults->fetchAll();
-        foreach ($trRows as $row) {
+        $results = $pdo->prepare(
+            'SELECT r.enrollment_id, r.term_id, MAX(r.updated_at) AS occurred_at, t.term_name, t.academic_year,
+                    COUNT(*) AS subject_count, ROUND(AVG(r.score), 2) AS average_score,
+                    MAX(r.status) AS status
+             FROM student_results r
+             INNER JOIN terms t ON t.id = r.term_id
+             INNER JOIN enrollments e ON e.id = r.enrollment_id
+             WHERE e.child_id = :child
+             GROUP BY r.enrollment_id, r.term_id, t.term_name, t.academic_year'
+        );
+        $results->execute(['child' => $childId]);
+        foreach ($results->fetchAll() as $row) {
+            $avg = (float)$row['average_score'];
+            $grade = 'F (Fail)';
+            if ($avg >= 75) $grade = 'A (Distinction)';
+            elseif ($avg >= 65) $grade = 'B (Credit)';
+            elseif ($avg >= 50) $grade = 'C (Pass)';
+            elseif ($avg >= 40) $grade = 'D (Weak Pass)';
+
             $tName = $row['term_name'] ?? 'Term Examination';
-            $ay = $row['academic_year'];
-            $avg = (float)$row['overall_average'];
-            $grade = $row['overall_grade'];
-            $pos = $row['position'];
-            $subjects = json_decode((string)($row['subjects_data'] ?? '[]'), true) ?: [];
-            $subCount = count($subjects);
-            $summary = "Examinations recorded for {$tName} {$ay}: Average {$avg}% (Grade {$grade}) across {$subCount} subjects" . ($pos ? ", Position {$pos}." : ".");
+            $ay = $row['academic_year'] ?? '';
+            $subCount = (int)$row['subject_count'];
+            $summary = "Examinations recorded for {$tName} {$ay}: Average {$avg}% (Grade {$grade}) across {$subCount} subjects.";
+
             $this->upsert(
                 $childId,
                 'learning_term_results',
-                $row['updated_at'] ?: $row['created_at'],
+                $row['occurred_at'] ?: (string)date('Y-m-d H:i:s'),
                 'result_period',
-                $row['id'],
-                'term_results:' . $row['id'],
+                $row['term_id'],
+                'results:' . $row['enrollment_id'] . ':' . $row['term_id'],
                 $summary,
                 [
                     'term' => $tName,
                     'academicYear' => $ay,
                     'averageScore' => $avg,
                     'grade' => $grade,
-                    'position' => $pos,
                     'subjectCount' => $subCount,
-                    'subjects' => $subjects,
-                    'status' => $row['status']
+                    'status' => $row['status'] ?? 'published'
                 ],
                 true,
-                $row['created_by'] ?? null
+                null
             );
-        }
-
-        if (empty($trRows)) {
-            $results=$pdo->prepare('SELECT r.enrollment_id,r.term_id,MAX(r.updated_at) AS occurred_at,t.term_name,t.academic_year,COUNT(*) AS subject_count,ROUND(AVG(r.score),2) AS average_score FROM student_results r INNER JOIN terms t ON t.id=r.term_id INNER JOIN enrollments e ON e.id=r.enrollment_id WHERE e.child_id=:child GROUP BY r.enrollment_id,r.term_id,t.term_name,t.academic_year');$results->execute(['child'=>$childId]);foreach($results->fetchAll() as $row){$this->upsert($childId,'learning_term_results',$row['occurred_at'],'result_period',null,'results:'.$row['enrollment_id'].':'.$row['term_id'],'Results recorded for '.$row['term_name'].' '.$row['academic_year'].': average '.$row['average_score'].' across '.$row['subject_count'].' subjects.',['term'=>$row['term_name'],'academicYear'=>$row['academic_year'],'averageScore'=>$row['average_score'],'subjectCount'=>(int)$row['subject_count']],true,null);}
         }
         $behaviour=$pdo->prepare('SELECT b.enrollment_id,b.term_id,MAX(b.created_at) AS occurred_at,t.term_name,t.academic_year,COUNT(*) AS record_count FROM behavioral_trackers b INNER JOIN terms t ON t.id=b.term_id INNER JOIN enrollments e ON e.id=b.enrollment_id WHERE e.child_id=:child GROUP BY b.enrollment_id,b.term_id,t.term_name,t.academic_year');$behaviour->execute(['child'=>$childId]);foreach($behaviour->fetchAll() as $row){$this->upsert($childId,'learning_support_recorded',$row['occurred_at'],'behaviour_period',null,'behaviour:'.$row['enrollment_id'].':'.$row['term_id'],'Learning and wellbeing support record updated for '.$row['term_name'].' '.$row['academic_year'].'.',['term'=>$row['term_name'],'academicYear'=>$row['academic_year'],'recordCount'=>(int)$row['record_count']],false,null);}
         $incentives=$pdo->prepare('SELECT * FROM incentives WHERE child_id=:child');$incentives->execute(['child'=>$childId]);foreach($incentives->fetchAll() as $row){$date=$row['disbursement_date']?:$row['created_at'];$type=$row['payment_status']==='disbursed'?'support_incentive_disbursed':'support_incentive_reviewed';$summary=$row['payment_status']==='disbursed'?'Education support recorded as disbursed.':'Education support eligibility reviewed.';$this->upsert($childId,$type,$date,'incentive',$row['id'],'incentive:'.$row['id'],$summary,['status'=>$row['payment_status'],'type'=>$row['incentive_type']],$row['payment_status']==='disbursed',null);}
