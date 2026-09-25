@@ -34,7 +34,42 @@ final class UserService
 
     public function get(string $id): array { $stmt=$this->database->pdo()->prepare('SELECT id,name,role,phone,email,staff_number,date_of_birth,photo_data,highest_qualification,rank_title,specialization,subjects_taught,assigned_scope_type,assigned_scope_id,is_active,last_login,created_at,updated_at FROM users WHERE id=:id');$stmt->execute(['id'=>$id]);$record=$stmt->fetch()?:throw new RuntimeException('User not found.');try{$cStmt=$this->database->pdo()->prepare('SELECT c.id, c.name, c.ward_id FROM user_community_assignments uca INNER JOIN communities c ON c.id=uca.community_id WHERE uca.user_id=:id ORDER BY c.name');$cStmt->execute(['id'=>$id]);$record['assigned_communities']=$cStmt->fetchAll();}catch(\Throwable){$record['assigned_communities']=[];}return $record; }
 
-    public function update(array $auth,string $id,array $input):array { $before=$this->get($id);$allowed=['name','role','assignedScopeType','assignedScopeId','isActive','password','staffNumber','dateOfBirth','photoData','highestQualification','rankTitle','specialization','subjectsTaught'];$data=[];foreach($allowed as $key)if(array_key_exists($key,$input))$data[$key]=$input[$key];if($data===[])throw new RuntimeException('No supported user fields were supplied.');$role=$data['role']??$before['role'];$scopeType=$data['assignedScopeType']??$before['assigned_scope_type'];$scopeId=$data['assignedScopeId']??$before['assigned_scope_id'];$this->validateScope($role,$scopeType,$scopeId);$sets=[];$params=['id'=>$id];$map=['name'=>'name','role'=>'role','assignedScopeType'=>'assigned_scope_type','assignedScopeId'=>'assigned_scope_id','staffNumber'=>'staff_number','dateOfBirth'=>'date_of_birth','photoData'=>'photo_data','highestQualification'=>'highest_qualification','rankTitle'=>'rank_title','specialization'=>'specialization'];foreach($map as$key=>$column)if(array_key_exists($key,$data)){$sets[]=$column.'=:'.$key;$params[$key]=in_array($key,['name','staffNumber','highestQualification','rankTitle','specialization'],true)?trim((string)$data[$key]):$data[$key];}if(array_key_exists('subjectsTaught',$data)){if(!is_array($data['subjectsTaught']))throw new RuntimeException('Subjects taught must be a list.');$sets[]='subjects_taught=:subjectsTaught';$params['subjectsTaught']=json_encode(array_values(array_unique(array_filter(array_map(static fn($subject)=>trim((string)$subject),$data['subjectsTaught'])))),JSON_THROW_ON_ERROR);}if(array_key_exists('isActive',$data)){$sets[]='is_active=:isActive';$params['isActive']=(bool)$data['isActive']?1:0;}if(isset($data['password'])){if(strlen((string)$data['password'])<14)throw new RuntimeException('Password must be at least 14 characters.');$sets[]='password_hash=:passwordHash';$params['passwordHash']=password_hash((string)$data['password'],PASSWORD_BCRYPT);}if($sets===[])throw new RuntimeException('No valid user updates were supplied.');$pdo=$this->database->pdo();$pdo->beginTransaction();try{$pdo->prepare('UPDATE users SET '.implode(',',$sets).' WHERE id=:id')->execute($params);if(isset($data['password'])||array_key_exists('isActive',$data)||isset($data['role'])||array_key_exists('assignedScopeType',$data)||array_key_exists('assignedScopeId',$data))$pdo->prepare('DELETE FROM refresh_tokens WHERE user_id=:id')->execute(['id'=>$id]);if(array_key_exists('assignedCommunityIds',$input)&&$role==='mobilizer'){$this->syncUserCommunities($pdo,$id,$scopeId,(array)$input['assignedCommunityIds']);}$pdo->commit();}catch(\Throwable $error){if($pdo->inTransaction())$pdo->rollBack();throw $error;}$after=$this->get($id);$this->audit->record($auth['id'],'UPDATE','user',$id,$before,$after);return $after; }
+    public function update(array $auth,string $id,array $input):array {
+        $before=$this->get($id);
+        $allowed=['name','role','assignedScopeType','assignedScopeId','isActive','password','staffNumber','dateOfBirth','photoData','highestQualification','rankTitle','specialization','subjectsTaught'];
+        $data=[];
+        foreach($allowed as $key)if(array_key_exists($key,$input))$data[$key]=$input[$key];
+        $hasCommUpdates = array_key_exists('assignedCommunityIds', $input) || array_key_exists('communityIds', $input);
+        if($data===[] && !$hasCommUpdates)throw new RuntimeException('No supported user fields were supplied.');
+        $role=$data['role']??$before['role'];
+        $scopeType=$data['assignedScopeType']??$before['assigned_scope_type'];
+        $scopeId=$data['assignedScopeId']??$before['assigned_scope_id'];
+        $this->validateScope($role,$scopeType,$scopeId);
+        $sets=[];
+        $params=['id'=>$id];
+        $map=['name'=>'name','role'=>'role','assignedScopeType'=>'assigned_scope_type','assignedScopeId'=>'assigned_scope_id','staffNumber'=>'staff_number','dateOfBirth'=>'date_of_birth','photoData'=>'photo_data','highestQualification'=>'highest_qualification','rankTitle'=>'rank_title','specialization'=>'specialization'];
+        foreach($map as$key=>$column)if(array_key_exists($key,$data)){$sets[]=$column.'=:'.$key;$params[$key]=in_array($key,['name','staffNumber','highestQualification','rankTitle','specialization'],true)?trim((string)$data[$key]):$data[$key];}
+        if(array_key_exists('subjectsTaught',$data)){if(!is_array($data['subjectsTaught']))throw new RuntimeException('Subjects taught must be a list.');$sets[]='subjects_taught=:subjectsTaught';$params['subjectsTaught']=json_encode(array_values(array_unique(array_filter(array_map(static fn($subject)=>trim((string)$subject),$data['subjectsTaught'])))),JSON_THROW_ON_ERROR);}
+        if(array_key_exists('isActive',$data)){$sets[]='is_active=:isActive';$params['isActive']=(bool)$data['isActive']?1:0;}
+        if(isset($data['password'])){if(strlen((string)$data['password'])<14)throw new RuntimeException('Password must be at least 14 characters.');$sets[]='password_hash=:passwordHash';$params['passwordHash']=password_hash((string)$data['password'],PASSWORD_BCRYPT);}
+        if($sets===[] && !$hasCommUpdates)throw new RuntimeException('No valid user updates were supplied.');
+        $pdo=$this->database->pdo();
+        $pdo->beginTransaction();
+        try{
+            if($sets!==[]){
+                $pdo->prepare('UPDATE users SET '.implode(',',$sets).' WHERE id=:id')->execute($params);
+            }
+            if(isset($data['password'])||array_key_exists('isActive',$data)||isset($data['role'])||array_key_exists('assignedScopeType',$data)||array_key_exists('assignedScopeId',$data))$pdo->prepare('DELETE FROM refresh_tokens WHERE user_id=:id')->execute(['id'=>$id]);
+            $commIds = $input['assignedCommunityIds'] ?? $input['communityIds'] ?? null;
+            if($commIds!==null && $role==='mobilizer'){
+                $this->syncUserCommunities($pdo,$id,$scopeId,(array)$commIds);
+            }
+            $pdo->commit();
+        }catch(\Throwable $error){if($pdo->inTransaction())$pdo->rollBack();throw $error;}
+        $after=$this->get($id);
+        $this->audit->record($auth['id'],'UPDATE','user',$id,$before,$after);
+        return $after;
+    }
 
     private function normaliseBase(array $data):array { $data['name']=trim($data['name']);$data['phone']=preg_replace('/\s+/','',$data['phone']);$data['email']=isset($data['email'])&&$data['email']!==null?strtolower(trim($data['email'])):null;return $data; }
     private function validateBase(array $data):void { if($data['name']===''||!preg_match('/^0\d{10}$/',$data['phone']))throw new RuntimeException('Provide a valid Nigerian 11-digit phone number.');if($data['email']!==null&&!filter_var($data['email'],FILTER_VALIDATE_EMAIL))throw new RuntimeException('Provide a valid email address.');if(strlen($data['password'])<14)throw new RuntimeException('Password must be at least 14 characters.'); }
