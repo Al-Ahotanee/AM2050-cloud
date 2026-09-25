@@ -525,13 +525,13 @@ final class ProgramService
             "SELECT c.id AS child_id,
                     COALESCE(h.ward_id, c.ward_id) AS ward_id,
                     h.community_id,
-                    COALESCE(h.primary_contact_name, CONCAT(COALESCE(h.father_name, ''), ' / ', COALESCE(h.mother_name, ''))) AS recipient_name,
+                    COALESCE(NULLIF(TRIM(CONCAT(COALESCE(h.father_name, ''), ' / ', COALESCE(h.mother_name, ''))), '/'), 'Registered Guardian') AS recipient_name,
                     COALESCE(h.phone_number, c.guardian_phone) AS recipient_phone,
                     COALESCE(AVG(at.attendance_status IN ('present','late')) * 100, 0) AS rate
              FROM children c
              LEFT JOIN households h ON h.id = c.household_id
              LEFT JOIN attendance at ON at.child_id = c.id AND DATE_FORMAT(at.date, '%Y-%m-01') = :month
-             GROUP BY c.id, h.ward_id, c.ward_id, h.community_id, h.primary_contact_name, h.father_name, h.mother_name, h.phone_number, c.guardian_phone"
+             GROUP BY c.id, h.ward_id, c.ward_id, h.community_id, h.father_name, h.mother_name, h.phone_number, c.guardian_phone"
         );
         $stmt->execute(['month' => $month]);
         $rows = $stmt->fetchAll();
@@ -734,7 +734,7 @@ final class ProgramService
 
         $sql = "SELECT i.*, 
                        c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url, c.guardian_phone,
-                       h.household_code, h.father_name, h.mother_name, h.primary_contact_name,
+                       h.household_code, h.father_name, h.mother_name, h.phone_number,
                        w.name AS ward_name, cm.name AS community_name,
                        s.school_name, sc.class_name
                 FROM incentives i
