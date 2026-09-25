@@ -80,8 +80,8 @@ if ($child) {
 }
 
 echo "=== 7. TESTING CHILD JOURNEY CHILDREN LIST (WITH FILTERS) ===\n";
-$rKids = req('GET', "/api/v1/child-journey/children?limit=5", null, $token);
-echo "HTTP {$rKids['code']}, Total Kids: " . ($rKids['data']['total'] ?? 0) . ", Returned: " . count($rKids['data']['data'] ?? []) . "\n";
+$totalCount = $rKids['data']['pagination']['total'] ?? $rKids['data']['total'] ?? 0;
+echo "HTTP {$rKids['code']}, Total Kids: " . $totalCount . ", Returned: " . count($rKids['data']['data'] ?? []) . "\n";
 
 echo "=== 8. TESTING CHILD JOURNEY DETAILS & KPIS ===\n";
 if ($child) {

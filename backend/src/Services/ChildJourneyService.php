@@ -117,7 +117,7 @@ final class ChildJourneyService
         // Academic Results
         $resCalc = $pdo->prepare(
             "SELECT ROUND(AVG(sr.score), 2) AS overall_average,
-                    COUNT(DISTINCT sr.subject_id) AS subject_count,
+                    COUNT(DISTINCT sr.subject) AS subject_count,
                     t.term_name, t.academic_year
              FROM student_results sr
              INNER JOIN enrollments e ON e.id = sr.enrollment_id
