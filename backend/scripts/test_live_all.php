@@ -79,7 +79,7 @@ if ($child) {
     }
 }
 
-echo "=== 7. TESTING CHILD JOURNEY CHILDREN LIST (WITH FILTERS) ===\n";
+$rKids = req('GET', "/api/v1/child-journey/children?limit=5", null, $token);
 $totalCount = $rKids['data']['pagination']['total'] ?? $rKids['data']['total'] ?? 0;
 echo "HTTP {$rKids['code']}, Total Kids: " . $totalCount . ", Returned: " . count($rKids['data']['data'] ?? []) . "\n";
 
