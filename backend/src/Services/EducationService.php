@@ -176,24 +176,86 @@ final class EducationService {
     ];
   }
 
-  public function scanAttendance(array $auth,array $data):array{$raw=trim((string)($data['qrToken']??''));$token=str_starts_with($raw,'AM2050:')?substr($raw,7):$raw;if(!preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/',$token))throw new RuntimeException('This QR code is not an AM2050 child attendance token.');$pdo=$this->db->pdo();$child=$pdo->prepare('SELECT id FROM children WHERE attendance_qr_token=:token LIMIT 1');$child->execute(['token'=>$token]);$childId=$child->fetchColumn();if(!$childId)throw new RuntimeException('The QR code does not match an active AM2050 child record.');$placement=$pdo->prepare("SELECT school_id,class_id FROM enrollments WHERE child_id=:child AND enrollment_status='active' ORDER BY enrollment_date DESC LIMIT 1");$placement->execute(['child'=>$childId]);$enrollment=$placement->fetch();if(!$enrollment)throw new RuntimeException('This child has no active school enrollment.');if(!empty($data['schoolId'])&&(string)$data['schoolId']!==$enrollment['school_id'])throw new RuntimeException('The scanned child is not enrolled in the selected school.');if(!empty($data['classId'])&&(string)$data['classId']!==($enrollment['class_id']??''))throw new RuntimeException('The scanned child is not assigned to the selected class.');return $this->recordAttendance($auth,['childId'=>$childId,'schoolId'=>$enrollment['school_id'],'classId'=>$enrollment['class_id'],'date'=>$data['date']??date('Y-m-d'),'attendanceStatus'=>$data['attendanceStatus']??'present','notes'=>$data['notes']??null,'scannedBy'=>$auth['id']]);}
+  public function scanAttendance(array $auth, array $data): array {
+    $raw = trim((string)($data['qrToken'] ?? $data['token'] ?? ''));
+    if (str_starts_with($raw, 'AM2050:')) {
+      $token = substr($raw, 7);
+    } else {
+      $token = $raw;
+    }
+    if ($token === '') {
+      throw new RuntimeException('QR code token is empty.');
+    }
+
+    $pdo = $this->db->pdo();
+    $childStmt = $pdo->prepare(
+      'SELECT id, child_unique_id, first_name, last_name, photo_url, gender 
+       FROM children 
+       WHERE attendance_qr_token = :t1 OR child_unique_id = :t2 OR id = :t3 
+       LIMIT 1'
+    );
+    $childStmt->execute(['t1' => $token, 't2' => $token, 't3' => $token]);
+    $child = $childStmt->fetch();
+    if (!$child) {
+      $childStmt->execute(['t1' => $raw, 't2' => $raw, 't3' => $raw]);
+      $child = $childStmt->fetch();
+    }
+    if (!$child) {
+      throw new RuntimeException("This QR code ({$raw}) does not match an active AM2050 child record.");
+    }
+    $childId = $child['id'];
+
+    $placement = $pdo->prepare(
+      "SELECT e.school_id, e.class_id, s.school_name, sc.class_name 
+       FROM enrollments e 
+       INNER JOIN schools s ON s.id = e.school_id 
+       LEFT JOIN school_classes sc ON sc.id = e.class_id 
+       WHERE e.child_id = :child AND e.enrollment_status = 'active' 
+       ORDER BY e.enrollment_date DESC LIMIT 1"
+    );
+    $placement->execute(['child' => $childId]);
+    $enrollment = $placement->fetch();
+    if (!$enrollment) {
+      throw new RuntimeException("Child {$child['first_name']} {$child['last_name']} has no active school enrollment.");
+    }
+
+    if (!empty($data['schoolId']) && (string)$data['schoolId'] !== $enrollment['school_id']) {
+      throw new RuntimeException('The scanned child is not enrolled in the selected school.');
+    }
+
+    $res = $this->recordAttendance($auth, [
+      'childId' => $childId,
+      'schoolId' => $enrollment['school_id'],
+      'classId' => $enrollment['class_id'],
+      'date' => $data['date'] ?? date('Y-m-d'),
+      'attendanceStatus' => $data['attendanceStatus'] ?? 'present',
+      'notes' => $data['notes'] ?? 'QR Verified Roll-Call',
+      'scannedBy' => $auth['id']
+    ]);
+
+    $res['child'] = [
+      'id' => $child['id'],
+      'child_unique_id' => $child['child_unique_id'],
+      'name' => trim($child['first_name'] . ' ' . $child['last_name']),
+      'first_name' => $child['first_name'],
+      'last_name' => $child['last_name'],
+      'photo_url' => $child['photo_url'],
+      'gender' => $child['gender'],
+      'school_name' => $enrollment['school_name'],
+      'class_name' => $enrollment['class_name'],
+    ];
+
+    return $res;
+  }
 
   public function attendanceMatrix(array $auth, array $query): array {
     $classId = (string)($query['class_id'] ?? $query['classId'] ?? '');
     if (!$classId) {
-        throw new RuntimeException('Class ID is required for attendance matrix.');
+        throw new RuntimeException('Class ID is required for attendance register.');
     }
     $this->assertClass($auth, $classId);
 
-    $month = (string)($query['month'] ?? date('Y-m'));
-    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
-        $month = date('Y-m');
-    }
-
-    $startDate = "{$month}-01";
-    $daysInMonth = (int)date('t', strtotime($startDate));
-    $endDate = date('Y-m-d', strtotime("{$startDate} + " . ($daysInMonth - 1) . " days"));
-
+    $granularity = strtolower((string)($query['granularity'] ?? 'month'));
     $pdo = $this->db->pdo();
 
     $classStmt = $pdo->prepare(
@@ -209,8 +271,78 @@ final class EducationService {
         throw new RuntimeException('Class not found.');
     }
 
+    $schoolDays = [];
+    $periodLabel = '';
+    $startDate = '';
+    $endDate = '';
+
+    if ($granularity === 'day') {
+        $date = (string)($query['date'] ?? date('Y-m-d'));
+        $startDate = $date;
+        $endDate = $date;
+        $schoolDays = [$date];
+        $periodLabel = date('l, d F Y', strtotime($date));
+    } elseif ($granularity === 'week') {
+        $refDate = (string)($query['date'] ?? $query['week_start'] ?? date('Y-m-d'));
+        $ts = strtotime($refDate);
+        $mon = date('Y-m-d', strtotime('monday this week', $ts));
+        $fri = date('Y-m-d', strtotime('friday this week', $ts));
+        $startDate = $mon;
+        $endDate = $fri;
+        for ($i = 0; $i < 5; $i++) {
+            $schoolDays[] = date('Y-m-d', strtotime("{$mon} + {$i} days"));
+        }
+        $periodLabel = 'Week ' . date('W', $ts) . ' (' . date('d M', strtotime($mon)) . ' – ' . date('d M Y', strtotime($fri)) . ')';
+    } elseif ($granularity === 'term') {
+        $termName = (string)($query['term'] ?? 'First Term');
+        $academicYear = (string)($query['academic_year'] ?? '2025/2026');
+        $tStmt = $pdo->prepare('SELECT * FROM terms WHERE term_name = :tname AND academic_year = :ayear LIMIT 1');
+        $tStmt->execute(['tname' => $termName, 'ayear' => $academicYear]);
+        $termRow = $tStmt->fetch();
+        if ($termRow) {
+            $startDate = $termRow['start_date'];
+            $endDate = $termRow['end_date'];
+        } else {
+            $startDate = '2025-09-15';
+            $endDate = '2025-12-19';
+        }
+        // Fetch all distinct recorded attendance dates in this class during the term
+        $distinctDatesStmt = $pdo->prepare('SELECT DISTINCT date FROM attendance WHERE class_id = :cid AND date BETWEEN :start AND :end ORDER BY date ASC');
+        $distinctDatesStmt->execute(['cid' => $classId, 'start' => $startDate, 'end' => $endDate]);
+        $recDates = $distinctDatesStmt->fetchAll(PDO::FETCH_COLUMN);
+        $schoolDays = !empty($recDates) ? $recDates : [$startDate];
+        $periodLabel = "{$termName} {$academicYear} Register";
+    } elseif ($granularity === 'year' || $granularity === 'session') {
+        $academicYear = (string)($query['academic_year'] ?? '2025/2026');
+        $startDate = '2025-09-01';
+        $endDate = '2026-07-31';
+        $distinctDatesStmt = $pdo->prepare('SELECT DISTINCT date FROM attendance WHERE class_id = :cid AND date BETWEEN :start AND :end ORDER BY date ASC');
+        $distinctDatesStmt->execute(['cid' => $classId, 'start' => $startDate, 'end' => $endDate]);
+        $recDates = $distinctDatesStmt->fetchAll(PDO::FETCH_COLUMN);
+        $schoolDays = !empty($recDates) ? $recDates : [$startDate];
+        $periodLabel = "Academic Session {$academicYear} Register";
+    } else {
+        // Default: month
+        $granularity = 'month';
+        $month = (string)($query['month'] ?? date('Y-m'));
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+            $month = date('Y-m');
+        }
+        $startDate = "{$month}-01";
+        $daysInMonth = (int)date('t', strtotime($startDate));
+        $endDate = date('Y-m-d', strtotime("{$startDate} + " . ($daysInMonth - 1) . " days"));
+        for ($i = 1; $i <= $daysInMonth; $i++) {
+            $dayStr = sprintf('%s-%02d', $month, $i);
+            $w = (int)date('w', strtotime($dayStr));
+            if ($w >= 1 && $w <= 5) {
+                $schoolDays[] = $dayStr;
+            }
+        }
+        $periodLabel = date('F Y', strtotime($startDate));
+    }
+
     $enrStmt = $pdo->prepare(
-        "SELECT e.id AS enrollment_id, c.id AS child_id, c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url
+        "SELECT e.id AS enrollment_id, c.id AS child_id, c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url, c.attendance_qr_token
          FROM enrollments e
          INNER JOIN children c ON c.id = e.child_id
          WHERE e.class_id = :class_id AND e.enrollment_status = 'active'
@@ -220,9 +352,10 @@ final class EducationService {
     $students = $enrStmt->fetchAll();
 
     $attStmt = $pdo->prepare(
-        'SELECT child_id, date, attendance_status, notes
-         FROM attendance
-         WHERE class_id = :class_id AND date BETWEEN :start AND :end'
+        'SELECT a.child_id, a.date, a.attendance_status, a.notes, a.created_at, u.name AS recorded_by_name
+         FROM attendance a
+         LEFT JOIN users u ON u.id = a.recorded_by
+         WHERE a.class_id = :class_id AND a.date BETWEEN :start AND :end'
     );
     $attStmt->execute(['class_id' => $classId, 'start' => $startDate, 'end' => $endDate]);
     $attRows = $attStmt->fetchAll();
@@ -233,22 +366,16 @@ final class EducationService {
         $d = $row['date'];
         $attMap[$cid][$d] = [
             'status' => $row['attendance_status'],
-            'notes' => $row['notes']
+            'notes' => $row['notes'],
+            'scannedAt' => $row['created_at'],
+            'recordedByName' => $row['recorded_by_name'],
         ];
-    }
-
-    $schoolDays = [];
-    for ($i = 1; $i <= $daysInMonth; $i++) {
-        $dayStr = sprintf('%s-%02d', $month, $i);
-        $w = (int)date('w', strtotime($dayStr));
-        $hasRecord = false;
-        foreach ($attRows as $r) {
-            if ($r['date'] === $dayStr) { $hasRecord = true; break; }
-        }
-        if (($w >= 1 && $w <= 5) || $hasRecord) {
-            $schoolDays[] = $dayStr;
+        // Ensure day is in schoolDays if attendance was recorded on that day
+        if (!in_array($d, $schoolDays, true)) {
+            $schoolDays[] = $d;
         }
     }
+    sort($schoolDays);
 
     $matrixRows = [];
     foreach ($students as $stu) {
@@ -261,7 +388,9 @@ final class EducationService {
                 $st = $rec['status'];
                 $daysData[$day] = [
                     'status' => $st,
-                    'notes' => $rec['notes']
+                    'notes' => $rec['notes'],
+                    'scannedAt' => $rec['scannedAt'] ?? null,
+                    'recordedByName' => $rec['recordedByName'] ?? null,
                 ];
                 if ($st === 'present') $present++;
                 elseif ($st === 'late') $late++;
@@ -291,7 +420,8 @@ final class EducationService {
 
     return [
         'class' => $classInfo,
-        'month' => $month,
+        'granularity' => $granularity,
+        'periodLabel' => $periodLabel,
         'startDate' => $startDate,
         'endDate' => $endDate,
         'schoolDays' => $schoolDays,

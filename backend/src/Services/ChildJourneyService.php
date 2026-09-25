@@ -26,6 +26,19 @@ final class ChildJourneyService
             $where .= ' AND (c.child_unique_id LIKE :search OR c.first_name LIKE :search OR c.last_name LIKE :search)';
             $params['search'] = "%{$search}%";
         }
+        if (!empty($query['class_id'])) {
+            $where .= ' AND js.active_class_id = :class_filter';
+            $params['class_filter'] = $query['class_id'];
+        }
+        if (!empty($query['school_id'])) {
+            $where .= ' AND js.active_school_id = :school_filter';
+            $params['school_filter'] = $query['school_id'];
+        }
+        if (!empty($query['gender']) && in_array($query['gender'], ['male', 'female'], true)) {
+            $where .= ' AND c.gender = :gender_filter';
+            $params['gender_filter'] = $query['gender'];
+        }
+
         $from = ' FROM children c LEFT JOIN households h ON h.id=c.household_id LEFT JOIN child_journey_summaries js ON js.child_id=c.id LEFT JOIN schools s ON s.id=js.active_school_id LEFT JOIN school_classes sc ON sc.id=js.active_class_id';
         $pdo = $this->database->pdo();
         $count = $pdo->prepare('SELECT COUNT(*)' . $from . $where);
@@ -88,13 +101,71 @@ final class ChildJourneyService
                 'sourceType' => $row['source_type'], 'canOpenSource' => ($auth['role'] ?? '') !== 'guardian' && in_array($row['source_type'], ['child','enrollment','attendance_period','result_period','incentive','referral'], true),
             ];
         }, $rows);
+
         $summary = $pdo->prepare('SELECT js.current_stage,js.next_action,js.last_event_at,s.school_name,sc.class_name FROM child_journey_summaries js LEFT JOIN schools s ON s.id=js.active_school_id LEFT JOIN school_classes sc ON sc.id=js.active_class_id WHERE js.child_id=:child');
         $summary->execute(['child'=>$childId]);
         $summaryData = $summary->fetch() ?: ['current_stage'=>'registered','next_action'=>'Review child record','last_event_at'=>$child['created_at'],'school_name'=>null,'class_name'=>null];
+
+        // Cumulative Attendance Metrics
+        $attCalc = $pdo->prepare("SELECT COUNT(*) AS total_days, SUM(attendance_status IN ('present', 'late')) AS attended_days, SUM(attendance_status = 'absent') AS absent_days FROM attendance WHERE child_id = :child");
+        $attCalc->execute(['child' => $childId]);
+        $attStats = $attCalc->fetch() ?: ['total_days' => 0, 'attended_days' => 0, 'absent_days' => 0];
+        $totalDays = (int)($attStats['total_days'] ?? 0);
+        $attendedDays = (int)($attStats['attended_days'] ?? 0);
+        $attendanceRate = $totalDays > 0 ? round(($attendedDays / $totalDays) * 100, 1) : 100.0;
+
+        // Academic Results
+        $resCalc = $pdo->prepare("SELECT overall_average, overall_grade, position, academic_year, t.term_name FROM student_term_results tr LEFT JOIN terms t ON t.id = tr.term_id WHERE tr.child_id = :child ORDER BY tr.created_at DESC LIMIT 1");
+        $resCalc->execute(['child' => $childId]);
+        $latestExam = $resCalc->fetch();
+
+        // Active Placement
+        $enrInfo = $pdo->prepare("SELECT e.*, s.school_name, sc.class_name FROM enrollments e INNER JOIN schools s ON s.id = e.school_id LEFT JOIN school_classes sc ON sc.id = e.class_id WHERE e.child_id = :child AND e.enrollment_status = 'active' LIMIT 1");
+        $enrInfo->execute(['child' => $childId]);
+        $activeEnr = $enrInfo->fetch();
+
+        $clearedGates = 1 + (!empty($activeEnr) ? 1 : 0) + ($totalDays > 0 ? 1 : 0) + (!empty($latestExam) ? 1 : 0);
+
         $nextCursor = null;
         if ($hasMore && $events !== []) { $last=$events[count($events)-1]; $nextCursor=base64_encode($last['occurredAt'].'|'.$last['id']); }
         $this->audit->record($auth['id'], 'VIEW_JOURNEY', 'child', $childId, null, ['eventCount'=>count($events), 'guardianView'=>($auth['role']??'')==='guardian']);
-        return ['child'=>['id'=>$child['id'],'registrationId'=>$child['child_unique_id'],'name'=>trim($child['first_name'].' '.$child['last_name']),'photoUrl'=>$child['photo_url'],'gender'=>$child['gender']], 'summary'=>['currentStage'=>$summaryData['current_stage'],'nextAction'=>$summaryData['next_action'],'lastEventAt'=>$summaryData['last_event_at'],'schoolName'=>$summaryData['school_name'],'className'=>$summaryData['class_name']], 'events'=>$events, 'nextCursor'=>$nextCursor];
+
+        return [
+            'child' => [
+                'id' => $child['id'],
+                'registrationId' => $child['child_unique_id'],
+                'name' => trim($child['first_name'] . ' ' . $child['last_name']),
+                'firstName' => $child['first_name'],
+                'lastName' => $child['last_name'],
+                'photoUrl' => $child['photo_url'],
+                'gender' => $child['gender'],
+                'dob' => $child['date_of_birth'] ?? null,
+                'estimatedAge' => $child['estimated_age'] ?? null,
+                'guardianPhone' => $child['guardian_phone'] ?? null,
+                'guardianName' => trim(($child['father_name'] ?? '') . ' ' . ($child['mother_name'] ?? '')),
+                'householdCode' => $child['household_code'] ?? null,
+                'wardName' => $child['ward_name'] ?? null,
+                'communityName' => $child['community_name'] ?? null,
+                'qrToken' => $child['attendance_qr_token'] ?? null,
+            ],
+            'summary' => [
+                'currentStage' => $summaryData['current_stage'],
+                'nextAction' => $summaryData['next_action'],
+                'lastEventAt' => $summaryData['last_event_at'],
+                'schoolName' => $summaryData['school_name'] ?? $activeEnr['school_name'] ?? null,
+                'className' => $summaryData['class_name'] ?? $activeEnr['class_name'] ?? null,
+                'overallAttendanceRate' => $attendanceRate,
+                'totalSchoolDays' => $totalDays,
+                'attendedDays' => $attendedDays,
+                'academicAverage' => $latestExam ? (float)$latestExam['overall_average'] : null,
+                'latestGrade' => $latestExam['overall_grade'] ?? null,
+                'latestPosition' => $latestExam['position'] ?? null,
+                'clearedGates' => $clearedGates,
+                'retentionStatus' => ($attendanceRate < 75 || ($attStats['absent_days'] ?? 0) >= 3) ? 'at_risk' : 'optimal',
+            ],
+            'events' => $events,
+            'nextCursor' => $nextCursor
+        ];
     }
 
     public function backfill(?string $actorId = null): array
@@ -115,7 +186,17 @@ final class ChildJourneyService
     private function assertAccessibleChild(array $auth, string $childId): array
     {
         [$scope,$params]=$this->childScope($auth,'c','h'); $params['child']=$childId;
-        $statement=$this->database->pdo()->prepare('SELECT c.id,c.child_unique_id,c.first_name,c.last_name,c.photo_url,c.gender,c.created_at FROM children c LEFT JOIN households h ON h.id=c.household_id WHERE c.id=:child'.$scope.' LIMIT 1');
+        $statement=$this->database->pdo()->prepare(
+            'SELECT c.id, c.child_unique_id, c.first_name, c.last_name, c.photo_url, c.gender, 
+                    c.date_of_birth, c.estimated_age, c.guardian_phone, c.attendance_qr_token, c.created_at,
+                    h.household_code, h.father_name, h.mother_name,
+                    w.name AS ward_name, cm.name AS community_name
+             FROM children c 
+             LEFT JOIN households h ON h.id=c.household_id 
+             LEFT JOIN wards w ON w.id=c.ward_id
+             LEFT JOIN communities cm ON cm.id=h.community_id
+             WHERE c.id=:child'.$scope.' LIMIT 1'
+        );
         $statement->execute($params); return $statement->fetch() ?: throw new RuntimeException('Child Journey record not found or not authorised.');
     }
 
@@ -143,7 +224,45 @@ final class ChildJourneyService
         $active=null;
         foreach($enrollments as $row){$type='enrollment_'.($row['enrollment_status']==='active'?'confirmed':$row['enrollment_status']);$title=$row['enrollment_status']==='active'?'Enrolled at ':ucfirst($row['enrollment_status']).' from ';$this->upsert($childId,$type,$row['enrollment_date'],'enrollment',$row['id'],'enrollment:'.$row['id'],$title.$row['school_name'].($row['class_name']?' · '.$row['class_name']:'.'),['school'=>$row['school_name'],'class'=>$row['class_name'],'status'=>$row['enrollment_status']],true,$row['approved_by']);if($row['enrollment_status']==='active')$active=$row;}
         $attendance=$pdo->prepare("SELECT DATE_FORMAT(a.date,'%Y-%m-01') AS period_start,MAX(a.date) AS period_end,a.school_id,a.class_id,s.school_name,sc.class_name,COUNT(*) AS recorded_days,SUM(a.attendance_status IN ('present','late')) AS attended_days FROM attendance a INNER JOIN schools s ON s.id=a.school_id LEFT JOIN school_classes sc ON sc.id=a.class_id WHERE a.child_id=:child GROUP BY period_start,a.school_id,a.class_id,s.school_name,sc.class_name");$attendance->execute(['child'=>$childId]);foreach($attendance->fetchAll() as $row){$rate=$row['recorded_days']?(int)round(((int)$row['attended_days']/(int)$row['recorded_days'])*100):0;$this->upsert($childId,'attendance_period_summary',$row['period_end'],'attendance_period',null,'attendance:'.$row['school_id'].':'.($row['class_id']??'none').':'.$row['period_start'],'Attendance recorded: '.$rate.'% across '.$row['recorded_days'].' school days.',['rate'=>$rate,'recordedDays'=>(int)$row['recorded_days'],'school'=>$row['school_name'],'class'=>$row['class_name'],'periodStart'=>$row['period_start']],true,null);}
-        $results=$pdo->prepare('SELECT r.enrollment_id,r.term_id,MAX(r.updated_at) AS occurred_at,t.term_name,t.academic_year,COUNT(*) AS subject_count,ROUND(AVG(r.score),2) AS average_score FROM student_results r INNER JOIN terms t ON t.id=r.term_id INNER JOIN enrollments e ON e.id=r.enrollment_id WHERE e.child_id=:child GROUP BY r.enrollment_id,r.term_id,t.term_name,t.academic_year');$results->execute(['child'=>$childId]);foreach($results->fetchAll() as $row){$this->upsert($childId,'learning_term_results',$row['occurred_at'],'result_period',null,'results:'.$row['enrollment_id'].':'.$row['term_id'],'Results recorded for '.$row['term_name'].' '.$row['academic_year'].': average '.$row['average_score'].' across '.$row['subject_count'].' subjects.',['term'=>$row['term_name'],'academicYear'=>$row['academic_year'],'averageScore'=>$row['average_score'],'subjectCount'=>(int)$row['subject_count']],true,null);}
+        
+        $termResults = $pdo->prepare('SELECT tr.*, t.term_name FROM student_term_results tr LEFT JOIN terms t ON t.id = tr.term_id WHERE tr.child_id = :child');
+        $termResults->execute(['child' => $childId]);
+        $trRows = $termResults->fetchAll();
+        foreach ($trRows as $row) {
+            $tName = $row['term_name'] ?? 'Term Examination';
+            $ay = $row['academic_year'];
+            $avg = (float)$row['overall_average'];
+            $grade = $row['overall_grade'];
+            $pos = $row['position'];
+            $subjects = json_decode((string)($row['subjects_data'] ?? '[]'), true) ?: [];
+            $subCount = count($subjects);
+            $summary = "Examinations recorded for {$tName} {$ay}: Average {$avg}% (Grade {$grade}) across {$subCount} subjects" . ($pos ? ", Position {$pos}." : ".");
+            $this->upsert(
+                $childId,
+                'learning_term_results',
+                $row['updated_at'] ?: $row['created_at'],
+                'result_period',
+                $row['id'],
+                'term_results:' . $row['id'],
+                $summary,
+                [
+                    'term' => $tName,
+                    'academicYear' => $ay,
+                    'averageScore' => $avg,
+                    'grade' => $grade,
+                    'position' => $pos,
+                    'subjectCount' => $subCount,
+                    'subjects' => $subjects,
+                    'status' => $row['status']
+                ],
+                true,
+                $row['created_by'] ?? null
+            );
+        }
+
+        if (empty($trRows)) {
+            $results=$pdo->prepare('SELECT r.enrollment_id,r.term_id,MAX(r.updated_at) AS occurred_at,t.term_name,t.academic_year,COUNT(*) AS subject_count,ROUND(AVG(r.score),2) AS average_score FROM student_results r INNER JOIN terms t ON t.id=r.term_id INNER JOIN enrollments e ON e.id=r.enrollment_id WHERE e.child_id=:child GROUP BY r.enrollment_id,r.term_id,t.term_name,t.academic_year');$results->execute(['child'=>$childId]);foreach($results->fetchAll() as $row){$this->upsert($childId,'learning_term_results',$row['occurred_at'],'result_period',null,'results:'.$row['enrollment_id'].':'.$row['term_id'],'Results recorded for '.$row['term_name'].' '.$row['academic_year'].': average '.$row['average_score'].' across '.$row['subject_count'].' subjects.',['term'=>$row['term_name'],'academicYear'=>$row['academic_year'],'averageScore'=>$row['average_score'],'subjectCount'=>(int)$row['subject_count']],true,null);}
+        }
         $behaviour=$pdo->prepare('SELECT b.enrollment_id,b.term_id,MAX(b.created_at) AS occurred_at,t.term_name,t.academic_year,COUNT(*) AS record_count FROM behavioral_trackers b INNER JOIN terms t ON t.id=b.term_id INNER JOIN enrollments e ON e.id=b.enrollment_id WHERE e.child_id=:child GROUP BY b.enrollment_id,b.term_id,t.term_name,t.academic_year');$behaviour->execute(['child'=>$childId]);foreach($behaviour->fetchAll() as $row){$this->upsert($childId,'learning_support_recorded',$row['occurred_at'],'behaviour_period',null,'behaviour:'.$row['enrollment_id'].':'.$row['term_id'],'Learning and wellbeing support record updated for '.$row['term_name'].' '.$row['academic_year'].'.',['term'=>$row['term_name'],'academicYear'=>$row['academic_year'],'recordCount'=>(int)$row['record_count']],false,null);}
         $incentives=$pdo->prepare('SELECT * FROM incentives WHERE child_id=:child');$incentives->execute(['child'=>$childId]);foreach($incentives->fetchAll() as $row){$date=$row['disbursement_date']?:$row['created_at'];$type=$row['payment_status']==='disbursed'?'support_incentive_disbursed':'support_incentive_reviewed';$summary=$row['payment_status']==='disbursed'?'Education support recorded as disbursed.':'Education support eligibility reviewed.';$this->upsert($childId,$type,$date,'incentive',$row['id'],'incentive:'.$row['id'],$summary,['status'=>$row['payment_status'],'type'=>$row['incentive_type']],$row['payment_status']==='disbursed',null);}
         $referrals=$pdo->prepare('SELECT u.* FROM unregistered_child_reports u WHERE u.converted_child_id=:child');$referrals->execute(['child'=>$childId]);foreach($referrals->fetchAll() as $row){$this->upsert($childId,'referral_registry_resolved',$row['updated_at'],'referral',$row['id'],'referral:'.$row['id'],'Child-not-in-register report resolved through registration.',['status'=>$row['status']],false,null);}
