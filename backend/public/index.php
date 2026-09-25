@@ -174,7 +174,10 @@ try {
     $router->add('PUT', '/api/v1/certificate-signature', static fn(Request $request) => $educationController->ownCertificateSignature($request));
     $router->add('GET', '/api/v1/attendance', static fn(Request $request) => $educationController->attendance($request));
     $router->add('POST', '/api/v1/attendance', static fn(Request $request) => $educationController->recordAttendance($request));
+    $router->add('POST', '/api/v1/attendance/batch', static fn(Request $request) => $educationController->batchRecordAttendance($request));
     $router->add('POST', '/api/v1/attendance/scan', static fn(Request $request) => $educationController->scanAttendance($request));
+    $router->add('GET', '/api/v1/attendance/matrix', static fn(Request $request) => $educationController->attendanceMatrix($request));
+    $router->add('GET', '/api/v1/attendance/stats', static fn(Request $request) => $educationController->attendanceStats($request));
     $router->add('GET', '/api/v1/dashboard/stats', static fn(Request $request) => $insightController->stats($request));
     $router->add('GET', '/api/v1/dashboard/decision', static fn(Request $request) => $insightController->decisionDashboard($request));
     $router->add('GET', '/api/v1/dashboard/metrics/:metric', static fn(Request $request, array $params) => $insightController->metricDrilldown($request, $params));

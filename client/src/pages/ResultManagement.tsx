@@ -742,71 +742,102 @@ export default function ResultManagement() {
       <div className="mx-auto max-w-[1440px] space-y-6">
 
         {/* 1. TOP HEADER & OPERATIONAL CONTEXT BANNER */}
-        <header className="flex flex-col justify-between gap-4 border-b border-[#cfd9d2] pb-5 lg:flex-row lg:items-center">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="coordinate-label">Universal Basic Education • Jigawa Pilot Registry</span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800">
-                <FileCheck size={12} />
-                SUBEB Jigawa Certified
+        <header className="rounded-2xl border border-[#cfd9d2] bg-white p-5 sm:p-6 shadow-sm">
+          {/* Top Context & Breadcrumb Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3.5 mb-4 text-xs font-semibold text-slate-500">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-400">Academics</span>
+              <span>/</span>
+              <span className="text-slate-800 font-bold">Result Management & Dossiers</span>
+              <span className="text-slate-300">•</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 border border-emerald-200">
+                <FileCheck size={12} className="text-emerald-700" />
+                SUBEB Jigawa Pilot Certified
               </span>
             </div>
-            <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-[#123148] sm:text-3xl">
-              Student Result Management & Report Dossiers
-            </h1>
-            <p className="mt-1 text-sm text-[#57707f]">
-              Classroom Continuous Assessment (40%), Terminal Examinations (60%), and A4 Printable Dossiers.
-            </p>
+
+            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <span>School:</span>
+              <strong className="text-slate-900 font-mono">AM2050-SCH-0003</strong>
+              <span className="text-slate-400">(GDJSS AHOTO)</span>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* PROMINENT BUTTON: Add / Enter New Result */}
-            <button
-              onClick={() => {
-                setSingleEnrollmentId(classReport?.students[0]?.enrollmentId || "");
-                setSingleSubject(selectedSubject || subjects[0]?.subject_name || "");
-                setSingleCaScore("");
-                setSingleExamScore("");
-                setSingleComments("");
-                setSingleModalOpen(true);
-              }}
-              className="action-press inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 text-sm font-bold shadow-md transition-colors"
-            >
-              <PlusCircle size={17} />
-              <span>Record New Result</span>
-            </button>
+          {/* Main Title and Action Toolbar Row */}
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h1 className="font-display text-2xl font-bold tracking-tight text-[#123148] sm:text-3xl">
+                Student Result Management & Report Dossiers
+              </h1>
+              <p className="mt-1 text-sm text-[#57707f]">
+                Official UBEC Continuous Assessment (40%), Terminal Examination (60%), and A4 Printable Dossiers.
+              </p>
+            </div>
 
-            {/* Quick CSV Bulk Import */}
-            <button
-              onClick={() => setBulkImportOpen(true)}
-              className="action-press inline-flex items-center gap-2 rounded-lg border border-emerald-700 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 px-3.5 py-2.5 text-sm font-semibold transition-colors"
-            >
-              <Upload size={16} />
-              <span>Bulk CSV Import</span>
-            </button>
+            {/* Single-Tier Unified Action Toolbar */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Primary Entry Action */}
+              <button
+                onClick={() => {
+                  setSingleEnrollmentId(classReport?.students[0]?.enrollmentId || "");
+                  setSingleSubject(selectedSubject || subjects[0]?.subject_name || "");
+                  setSingleCaScore("");
+                  setSingleExamScore("");
+                  setSingleComments("");
+                  setSingleModalOpen(true);
+                }}
+                className="action-press inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 text-xs font-bold shadow transition-colors"
+              >
+                <PlusCircle size={15} />
+                <span>Record Result</span>
+              </button>
 
-            {/* Batch Print All Cards */}
-            <button
-              onClick={() => {
-                setActiveStudentId(undefined);
-                setReportModalOpen(true);
-              }}
-              disabled={!classReport || classReport.students.length === 0}
-              className="action-press inline-flex items-center gap-2 rounded-lg bg-[#234c64] hover:bg-[#1a384b] text-white px-4 py-2.5 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50"
-            >
-              <Printer size={16} />
-              <span>Print Class Batch ({classReport?.students.length || 0} Dossiers)</span>
-            </button>
+              {/* Bulk Import */}
+              <button
+                onClick={() => setBulkImportOpen(true)}
+                className="action-press inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-3.5 text-xs font-bold shadow-sm transition-colors"
+              >
+                <Upload size={14} className="text-emerald-700" />
+                <span>Bulk CSV</span>
+              </button>
 
-            {/* Refresh Button */}
-            <button
-              onClick={() => void fetchClassReport()}
-              disabled={loadingReport}
-              className="action-press inline-flex items-center gap-2 rounded-lg border border-[#b9c9c0] bg-white px-3.5 py-2.5 text-sm font-semibold text-[#234c64] hover:border-[#167a4c] transition-colors"
-            >
-              <RefreshCw size={15} className={loadingReport ? "animate-spin" : ""} />
-              <span>Refresh</span>
-            </button>
+              {/* Batch Print Cards */}
+              <button
+                onClick={() => {
+                  setActiveStudentId(undefined);
+                  setReportModalOpen(true);
+                }}
+                disabled={!classReport || classReport.students.length === 0}
+                className="action-press inline-flex h-10 items-center gap-2 rounded-lg bg-[#1a384b] hover:bg-[#122735] text-white px-4 text-xs font-bold shadow transition-colors disabled:opacity-50"
+              >
+                <Printer size={15} />
+                <span>Print Dossiers</span>
+                <span className="ml-0.5 rounded-full bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 font-mono text-[10px]">
+                  {classReport?.students.length || 0}
+                </span>
+              </button>
+
+              {/* Export CSV Ledger */}
+              <button
+                onClick={handleExportCSV}
+                disabled={!classReport}
+                className="action-press inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-3 text-xs font-semibold shadow-sm transition-colors"
+                title="Export Master Results Ledger to CSV"
+              >
+                <Download size={14} />
+                <span>Export</span>
+              </button>
+
+              {/* Refresh */}
+              <button
+                onClick={() => void fetchClassReport()}
+                disabled={loadingReport}
+                className="action-press inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-colors"
+                title="Refresh Result Data"
+              >
+                <RefreshCw size={15} className={loadingReport ? "animate-spin" : ""} />
+              </button>
+            </div>
           </div>
         </header>
 

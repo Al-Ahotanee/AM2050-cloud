@@ -1,5 +1,6 @@
-import React, { useRef, useMemo } from 'react';
-import { Printer, X, Award, ShieldCheck, Calendar, BookOpen, UserCheck } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { Printer, X, Award, ExternalLink, Calendar, BookOpen, UserCheck, ShieldCheck } from 'lucide-react';
 
 export interface SubjectResultItem {
   id?: string;
@@ -94,8 +95,6 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
   sheets,
   activeStudentId,
 }) => {
-  const printRef = useRef<HTMLDivElement>(null);
-
   // Safe fallback: never empty when sheets has items
   const displaySheets = useMemo(() => {
     if (!sheets || sheets.length === 0) return [];
@@ -115,47 +114,36 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
 
   if (!isOpen || displaySheets.length === 0) return null;
 
+  // Direct, rock-solid browser printing using standard body portal
   const handlePrint = () => {
-    const printNode = document.getElementById('formal-report-dossier-print');
+    window.print();
+  };
+
+  // Secondary bulletproof option: Opens dedicated printable tab
+  const handleOpenPrintTab = () => {
+    const printNode = document.getElementById('am2050-print-portal') || document.getElementById('formal-report-dossier-preview');
     if (!printNode) {
       window.print();
       return;
     }
 
-    try {
-      // Remove any previously created print iframe
-      const oldIframe = document.getElementById('am2050-report-print-iframe');
-      if (oldIframe) {
-        oldIframe.remove();
-      }
+    const printWin = window.open('', '_blank');
+    if (!printWin) {
+      window.print();
+      return;
+    }
 
-      const iframe = document.createElement('iframe');
-      iframe.id = 'am2050-report-print-iframe';
-      iframe.style.position = 'fixed';
-      iframe.style.top = '-9999px';
-      iframe.style.left = '-9999px';
-      iframe.style.width = '210mm';
-      iframe.style.height = '297mm';
-      iframe.style.border = 'none';
-      document.body.appendChild(iframe);
+    const stylesHtml = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((s) => s.outerHTML)
+      .join('\n');
 
-      const frameDoc = iframe.contentWindow?.document;
-      if (!frameDoc) {
-        window.print();
-        return;
-      }
-
-      // Collect all active styles from the host document
-      const stylesHtml = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-        .map((node) => node.outerHTML)
-        .join('\n');
-
-      frameDoc.open();
-      frameDoc.write(`<!DOCTYPE html>
+    printWin.document.open();
+    printWin.document.write(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AM2050 — Terminal Academic Report Dossier</title>
+  <title>AM2050 Terminal Academic Report Dossier — GDJSS AHOTO</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   ${stylesHtml}
   <style>
     @page {
@@ -176,51 +164,45 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
       break-after: page !important;
       min-height: 275mm !important;
       width: 100% !important;
-      max-width: 100% !important;
+      max-width: 210mm !important;
       padding: 8mm 10mm !important;
-      margin: 0 auto !important;
+      margin: 0 auto 20px auto !important;
       box-shadow: none !important;
       border: 1px solid #cbd5e1 !important;
       background: #ffffff !important;
       box-sizing: border-box !important;
-      display: flex !important;
-      flex-direction: column !important;
-      justify-content: space-between !important;
     }
     .dossier-sheet-page:last-child {
       page-break-after: auto !important;
       break-after: auto !important;
+      margin-bottom: 0 !important;
     }
     .no-print {
       display: none !important;
     }
   </style>
 </head>
-<body class="bg-white text-slate-900 p-0 m-0">
-  ${printNode.innerHTML}
+<body class="bg-slate-100 text-slate-900 p-4">
+  <div class="no-print max-w-[210mm] mx-auto mb-4 bg-slate-900 text-white p-3.5 rounded-xl shadow-lg flex items-center justify-between">
+    <div>
+      <h3 class="text-sm font-bold">Printable Official A4 Academic Dossier (${displaySheets.length} Learners)</h3>
+      <p class="text-xs text-slate-400">Jigawa State SUBEB · Government Day Junior Secondary School Ahoto</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="window.print()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow transition-colors">
+        Print / Save to PDF
+      </button>
+      <button onclick="window.close()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg">
+        Close Window
+      </button>
+    </div>
+  </div>
+  <div class="max-w-[210mm] mx-auto">
+    ${printNode.innerHTML}
+  </div>
 </body>
 </html>`);
-      frameDoc.close();
-
-      setTimeout(() => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (e) {
-          console.error("Iframe print invocation error, fallback to window.print", e);
-          window.print();
-        } finally {
-          setTimeout(() => {
-            if (document.body.contains(iframe)) {
-              iframe.remove();
-            }
-          }, 2000);
-        }
-      }, 400);
-    } catch (err) {
-      console.error("Print generation exception, fallback to window.print", err);
-      window.print();
-    }
+    printWin.document.close();
   };
 
   const getGradeColor = (grade: string) => {
@@ -252,14 +234,387 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
   const schoolCode = schoolInfo?.code || 'AM2050-SCH-0003';
   const schoolName = schoolInfo?.name || 'GOVERNMENT DAY JUNIOR SECONDARY SCHOOL AHOTO';
 
+  // Single sheet renderer (used for both screen modal and body print portal)
+  const renderSheetContent = (sheet: StudentReportSheet, sheetIdx: number, isLast: boolean) => {
+    const stu = sheet.student;
+    const summary = sheet.summary;
+    const att = sheet.attendance;
+
+    const stuId = stu.id || stu.child_id || sheet.enrollmentId || '';
+    const uniqueIdentifier =
+      stu.child_unique_id ||
+      stu.nin ||
+      stu.am2050_id ||
+      (stuId ? `NG-STU-${stuId.slice(-6).toUpperCase()}` : 'NG-STU-001');
+
+    return (
+      <div
+        key={stuId || sheetIdx}
+        className={`dossier-sheet-page bg-white text-slate-900 border border-slate-300 shadow-sm p-8 sm:p-10 mx-auto max-w-[210mm] min-h-[297mm] ${
+          !isLast ? 'mb-8' : ''
+        }`}
+      >
+        {/* UPPER HALF: HEADER, BIODATA, COGNITIVE DOMAIN, AFFECTIVE DOMAIN */}
+        <div>
+          {/* 1. OFFICIAL ACADEMIC HEADER */}
+          <div className="border-b-4 border-double border-emerald-800 pb-4 mb-5">
+            <div className="flex items-center justify-between gap-4">
+              {/* Left: Coat of Arms / SUBEB Emblem */}
+              <div className="w-20 h-20 shrink-0 flex flex-col items-center justify-center p-1 border border-slate-200 rounded-lg bg-emerald-50">
+                <div className="w-10 h-10 rounded-full bg-emerald-700 text-white flex items-center justify-center font-black text-xs shadow-sm">
+                  UBEC
+                </div>
+                <span className="text-[9px] uppercase tracking-tighter text-emerald-900 font-bold mt-1 text-center leading-none">
+                  Jigawa SUBEB
+                </span>
+              </div>
+
+              {/* Center: Institutional Identity */}
+              <div className="text-center flex-1">
+                <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-600">
+                  Federal Republic of Nigeria • State Universal Basic Education Board
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-black uppercase text-emerald-900 tracking-tight my-0.5">
+                  {schoolName}
+                </h1>
+                <div className="text-xs font-semibold text-slate-700">
+                  School Registry Code: <span className="font-mono text-emerald-800 font-bold">{schoolCode}</span> • LGA: <span className="font-bold">{schoolLga}</span> • State: <span className="font-bold">{schoolState}</span> (Ward: {schoolWard})
+                </div>
+                <div className="inline-block mt-2 px-4 py-1 bg-emerald-800 text-white text-xs font-bold uppercase tracking-wider rounded-md shadow-sm">
+                  Continuous Assessment (40%) & Terminal Examination (60%) Dossier
+                </div>
+              </div>
+
+              {/* Right: AM2050 Biometric / Registry Badge */}
+              <div className="w-20 h-20 shrink-0 flex flex-col items-center justify-center p-1 border border-slate-200 rounded-lg bg-slate-50">
+                <div className="w-10 h-10 rounded-lg bg-slate-800 text-emerald-400 flex items-center justify-center font-black text-xs shadow-sm">
+                  AM2050
+                </div>
+                <span className="text-[9px] uppercase tracking-tighter text-slate-600 font-bold mt-1 text-center leading-none">
+                  Pilot Jigawa
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. STUDENT BIODATA & ENROLLMENT BANNER */}
+          <div className="bg-slate-50 border border-slate-300 rounded-lg p-3.5 mb-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div>
+              <span className="text-slate-500 font-medium block text-[10px] uppercase">Learner Full Name</span>
+              <span className="font-bold text-slate-900 text-sm uppercase">
+                {stu.last_name}, {stu.first_name}
+              </span>
+            </div>
+
+            <div>
+              <span className="text-slate-500 font-medium block text-[10px] uppercase">National Learner ID / NIN</span>
+              <span className="font-mono font-bold text-emerald-800 text-sm">
+                {uniqueIdentifier}
+              </span>
+            </div>
+
+            <div>
+              <span className="text-slate-500 font-medium block text-[10px] uppercase">Class Arm & Level</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {classInfo?.name || 'JSS 1'} ({classInfo?.level || 'Junior Secondary'})
+              </span>
+            </div>
+
+            <div>
+              <span className="text-slate-500 font-medium block text-[10px] uppercase">Session & Term</span>
+              <span className="font-bold text-slate-900 text-sm">
+                {termInfo?.name || 'First Term'} ({termInfo?.academicYear || '2025/2026'})
+              </span>
+            </div>
+
+            <div className="border-t border-slate-200 pt-2 col-span-2 sm:col-span-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+              <div>
+                <span className="text-slate-500">Gender: </span>
+                <strong className="text-slate-800 capitalize">{stu.gender || 'Not specified'}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Class Form Master: </span>
+                <strong className="text-slate-800">{classInfo?.teacherName || 'Suleiman Ibrahim'}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Term Attendance: </span>
+                <strong className="text-emerald-800 font-bold">{att?.present ?? 0} Days Present</strong>
+                <span className="text-slate-400"> / {att?.total ?? 0}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">Class Standing: </span>
+                <strong className="text-blue-900 font-black">
+                  {summary.positionText || (summary.rank ? `${summary.rank} of ${sheets.length}` : 'Evaluated')}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. COGNITIVE DOMAIN: SUBJECT SCORES TABLE */}
+          <div className="mb-5 overflow-hidden border border-slate-300 rounded-lg">
+            <div className="bg-slate-100 px-3 py-2 border-b border-slate-300 flex items-center justify-between">
+              <span className="font-bold uppercase tracking-wider text-xs text-slate-800 flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-emerald-800" />
+                Cognitive Domain (Continuous Assessment & Terminal Examinations)
+              </span>
+              <span className="text-[10px] font-mono text-slate-500 font-semibold">
+                Grading Policy: CA (40%) + Exam (60%) = Total (100%)
+              </span>
+            </div>
+
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-300 text-slate-700 font-extrabold text-[11px]">
+                  <th className="py-2 px-3 border-r border-slate-200 w-8 text-center">S/N</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Curriculum Subject</th>
+                  <th className="py-2 px-2.5 border-r border-slate-200 text-center w-16">CA (40)</th>
+                  <th className="py-2 px-2.5 border-r border-slate-200 text-center w-16">Exam (60)</th>
+                  <th className="py-2 px-2.5 border-r border-slate-200 text-center w-20">Total (100)</th>
+                  <th className="py-2 px-2.5 border-r border-slate-200 text-center w-14">Grade</th>
+                  <th className="py-2 px-2.5 border-r border-slate-200 text-center w-24">Class Avg</th>
+                  <th className="py-2 px-3">Subject Teacher Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {sheet.results.map((res, rIdx) => {
+                  const total = res.score ?? ((res.caScore ?? 0) + (res.examScore ?? 0));
+                  const grade = res.grade || (total >= 75 ? 'A' : total >= 65 ? 'B' : total >= 50 ? 'C' : total >= 40 ? 'D' : 'F');
+                  return (
+                    <tr key={res.id || rIdx} className={rIdx % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}>
+                      <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-[11px] text-slate-500">
+                        {rIdx + 1}
+                      </td>
+                      <td className="py-1.5 px-3 border-r border-slate-200 font-bold text-slate-900">
+                        {res.subject}
+                      </td>
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 text-center font-mono text-slate-700">
+                        {res.caScore !== null ? res.caScore : '—'}
+                      </td>
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 text-center font-mono text-slate-700">
+                        {res.examScore !== null ? res.examScore : '—'}
+                      </td>
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 text-center font-mono font-bold text-slate-900">
+                        {total}
+                      </td>
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 text-center font-black">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] border ${getGradeColor(grade)}`}>
+                          {grade}
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 text-center font-mono text-slate-500 text-[11px]">
+                        {res.stats?.avg ? `${Math.round(res.stats.avg)}%` : '—'}
+                      </td>
+                      <td className="py-1.5 px-3 text-[11px] text-slate-600 italic">
+                        {res.notes || getGradeRemark(grade)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+
+              {/* Cognitive Domain Cumulative Totals */}
+              <tfoot>
+                <tr className="bg-slate-100 font-black text-slate-900 border-t-2 border-slate-300">
+                  <td colSpan={2} className="py-2.5 px-3 border-r border-slate-300 text-right uppercase tracking-wider">
+                    Cumulative Performance Summary:
+                  </td>
+                  <td className="py-2.5 px-2.5 border-r border-slate-300 text-center font-mono text-slate-700">
+                    {sheet.results.reduce((a, b) => a + (b.caScore ?? 0), 0)}
+                  </td>
+                  <td className="py-2.5 px-2.5 border-r border-slate-300 text-center font-mono text-slate-700">
+                    {sheet.results.reduce((a, b) => a + (b.examScore ?? 0), 0)}
+                  </td>
+                  <td className="py-2.5 px-2.5 border-r border-slate-300 text-center font-mono text-emerald-900 text-sm">
+                    {summary.totalScore} <span className="text-[10px] text-slate-500 font-normal">/ {summary.maxObtainable}</span>
+                  </td>
+                  <td className="py-2.5 px-2.5 border-r border-slate-300 text-center">
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-black border ${getGradeColor(summary.overallGrade)}`}>
+                      {summary.overallGrade}
+                    </span>
+                  </td>
+                  <td colSpan={2} className="py-2.5 px-3 text-slate-800">
+                    Terminal Average: <strong className="font-mono text-emerald-800 text-sm">{summary.averageScore}%</strong> • Decision: <strong className="uppercase text-emerald-900 font-bold">{summary.decision}</strong>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* 4. AFFECTIVE & PSYCHOMOTOR BEHAVIORAL DOMAINS */}
+          <div className="grid grid-cols-2 gap-4 mb-5 text-xs">
+            {/* Affective Domain Ratings */}
+            <div className="border border-slate-300 rounded-lg p-3 bg-slate-50">
+              <h4 className="text-[11px] font-black uppercase text-slate-800 mb-2 border-b border-slate-200 pb-1 flex items-center justify-between">
+                <span>Affective Domain (Character & Social Conduct)</span>
+                <span className="text-[9px] font-mono text-slate-400 font-normal">Rated 1 (Poor) to 5 (Exemplary)</span>
+              </h4>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                <div className="flex justify-between items-center py-0.5 border-b border-slate-200">
+                  <span className="text-slate-600">Punctuality:</span>
+                  <span className="font-bold font-mono text-emerald-800">5 / 5 ★★★★★</span>
+                </div>
+                <div className="flex justify-between items-center py-0.5 border-b border-slate-200">
+                  <span className="text-slate-600">Neatness & Decorum:</span>
+                  <span className="font-bold font-mono text-emerald-800">5 / 5 ★★★★★</span>
+                </div>
+                <div className="flex justify-between items-center py-0.5 border-b border-slate-200">
+                  <span className="text-slate-600">Attentiveness & Focus:</span>
+                  <span className="font-bold font-mono text-emerald-800">4 / 5 ★★★★☆</span>
+                </div>
+                <div className="flex justify-between items-center py-0.5 border-b border-slate-200">
+                  <span className="text-slate-600">Honesty & Reliability:</span>
+                  <span className="font-bold font-mono text-emerald-800">5 / 5 ★★★★★</span>
+                </div>
+                <div className="flex justify-between items-center py-0.5 border-b border-slate-200">
+                  <span className="text-slate-600">Teamwork & Comradeship:</span>
+                  <span className="font-bold font-mono text-emerald-800">4 / 5 ★★★★☆</span>
+                </div>
+                <div className="flex justify-between items-center py-0.5 border-b border-slate-200">
+                  <span className="text-slate-600">Leadership Initiative:</span>
+                  <span className="font-bold font-mono text-emerald-800">4 / 5 ★★★★☆</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Grading Scale Legend */}
+            <div className="border border-slate-300 rounded-lg p-3 bg-slate-50">
+              <h4 className="text-[11px] font-black uppercase text-slate-800 mb-2 border-b border-slate-200 pb-1">
+                UBEC Standard Assessment Grading Key
+              </h4>
+              <table className="w-full text-left text-[10px] border-collapse">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-200 font-bold">
+                    <th className="pb-1">Range</th>
+                    <th className="pb-1">Grade</th>
+                    <th className="pb-1">Classification</th>
+                    <th className="pb-1">Remark</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  <tr><td className="py-0.5 font-mono">75% - 100%</td><td className="font-bold text-emerald-800">A</td><td>Excellent</td><td>Distinction</td></tr>
+                  <tr><td className="py-0.5 font-mono">65% - 74%</td><td className="font-bold text-blue-800">B</td><td>Very Good</td><td>Commendable</td></tr>
+                  <tr><td className="py-0.5 font-mono">50% - 64%</td><td className="font-bold text-amber-800">C</td><td>Good</td><td>Credit</td></tr>
+                  <tr><td className="py-0.5 font-mono">40% - 49%</td><td className="font-bold text-orange-800">D</td><td>Fair</td><td>Pass</td></tr>
+                  <tr><td className="py-0.5 font-mono">0% - 39%</td><td className="font-bold text-rose-800">F</td><td>Unsatisfactory</td><td>Requires Intervention</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* LOWER HALF: ATTESTATIONS, REMARKS, OFFICIAL SEAL & FOOTER */}
+        <div className="border-t-2 border-slate-300 pt-4 mt-2">
+          <div className="grid grid-cols-2 gap-6 text-xs mb-4">
+            {/* Form Teacher Remark */}
+            <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/70">
+              <span className="text-[10px] font-bold uppercase text-slate-500 block mb-1">
+                Class Form Master's Recommendation:
+              </span>
+              <p className="italic text-slate-800 font-medium min-h-[32px] text-xs">
+                {summary.averageScore >= 70
+                  ? `An exceptional academic performance. Demonstrates disciplined mastery across basic science and humanities. Promoted with commendable honors.`
+                  : summary.averageScore >= 50
+                  ? `A very creditable result with consistent classroom engagement. Capable of distinction with dedicated focus on exam preparation.`
+                  : `Demonstrates potential. Recommended for targeted literacy and remedial math mentoring in the coming term.`}
+              </p>
+              <div className="mt-3 pt-2 border-t border-slate-300 flex items-center justify-between text-[11px]">
+                <div>
+                  <span className="font-serif italic font-bold text-slate-700">
+                    {classInfo?.teacherName || 'Suleiman Ibrahim'}
+                  </span>
+                  <span className="text-slate-400 block text-[9px] uppercase">Form Master Signature</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono text-slate-600">{termInfo?.endDate || '2026-12-18'}</span>
+                  <span className="text-slate-400 block text-[9px] uppercase">Date Certified</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Headmaster / Principal Remark & Official Stamp */}
+            <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/70 relative">
+              <span className="text-[10px] font-bold uppercase text-slate-500 block mb-1">
+                Headmaster / Principal's Attestation:
+              </span>
+              <p className="italic text-slate-800 font-medium min-h-[32px] text-xs">
+                {summary.decision === 'PASSED'
+                  ? `Results verified and approved. Promoted with commendable standing to the subsequent academic level.`
+                  : `Results verified. Academic advisory issued; guardian conference scheduled.`}
+              </p>
+
+              {/* Simulated Official Seal Stamp */}
+              <div className="absolute right-4 top-2 pointer-events-none opacity-80 rotate-[-8deg] border-2 border-dashed border-emerald-700 rounded-full w-20 h-20 flex flex-col items-center justify-center p-1 text-center">
+                <span className="text-[7px] font-black text-emerald-800 uppercase leading-none">OFFICIAL SEAL</span>
+                <span className="text-[8px] font-black text-emerald-900 leading-tight">GDJSS AHOTO</span>
+                <span className="text-[6px] font-bold text-emerald-700">SUBEB JIGAWA</span>
+              </div>
+
+              <div className="mt-3 pt-2 border-t border-slate-300 flex items-center justify-between text-[11px]">
+                <div>
+                  <span className="font-serif italic font-bold text-slate-800">
+                    Mallam Usman Bello Ahoto
+                  </span>
+                  <span className="text-slate-400 block text-[9px] uppercase">Headmaster Signature & Stamp</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-mono text-slate-600">{termInfo?.endDate || '2026-12-18'}</span>
+                  <span className="text-slate-400 block text-[9px] uppercase">Date Sealed</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Resumption Notice & Footer Security Ledger */}
+          <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-200 pt-2 font-medium">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Next Term Resumption Date: <strong className="text-slate-900 font-semibold">{termInfo?.nextTermBegins || 'Monday, 11th January 2027'}</strong></span>
+            </div>
+            <div>
+              <span>Digital Verification Hash: <strong className="font-mono text-slate-700">{(stuId || 'AM2050').slice(0, 10).toUpperCase()}-VERIFIED-AM2050-JIGAWA</strong></span>
+            </div>
+            <div>
+              <span>Universal Basic Education Board • Jigawa State</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    );
+  };
+
   return (
     <>
-      {/* Dedicated Print Engine Stylesheet - Injected into Document */}
+      {/* 1. Global Print Stylesheet: cleanly hides everything in #root and isolates the print portal */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
+            @media screen {
+              #am2050-print-portal {
+                display: none !important;
+              }
+            }
+
             @media print {
-              /* 1. Global Reset for Printing */
+              /* Hide the entire app, modal overlays, fixed backdrops, navigation */
+              #root,
+              .no-print,
+              dialog {
+                display: none !important;
+              }
+
+              /* Display the clean body portal natively */
+              #am2050-print-portal {
+                display: block !important;
+                position: static !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #ffffff !important;
+                color: #0f172a !important;
+                visibility: visible !important;
+              }
+
               html, body {
                 margin: 0 !important;
                 padding: 0 !important;
@@ -272,29 +627,6 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
                 print-color-adjust: exact !important;
               }
 
-              /* 2. Hide everything except our specific printable report dossier */
-              body * {
-                visibility: hidden !important;
-              }
-
-              #formal-report-dossier-print,
-              #formal-report-dossier-print * {
-                visibility: visible !important;
-              }
-
-              /* 3. Position the printable container cleanly at (0, 0) */
-              #formal-report-dossier-print {
-                position: absolute !important;
-                left: 0 !important;
-                top: 0 !important;
-                width: 100% !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                background: #ffffff !important;
-                overflow: visible !important;
-              }
-
-              /* 4. A4 Portrait Page Specifications */
               @page {
                 size: A4 portrait;
                 margin: 8mm 8mm 8mm 8mm;
@@ -309,8 +641,9 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
                 padding: 8mm 10mm !important;
                 margin: 0 auto !important;
                 box-shadow: none !important;
-                border: none !important;
+                border: 1px solid #cbd5e1 !important;
                 background: #ffffff !important;
+                box-sizing: border-box !important;
                 display: flex !important;
                 flex-direction: column !important;
                 justify-content: space-between !important;
@@ -320,23 +653,29 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
                 page-break-after: auto !important;
                 break-after: auto !important;
               }
-
-              .no-print {
-                display: none !important;
-              }
             }
           `,
         }}
       />
 
-      {/* Screen Modal Overlay */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto print:static print:p-0 print:m-0 print:bg-white print:overflow-visible">
+      {/* 2. Direct Body Portal for 100% Reliable Native Printing */}
+      {createPortal(
+        <div id="am2050-print-portal">
+          {displaySheets.map((sheet, idx) =>
+            renderSheetContent(sheet, idx, idx === displaySheets.length - 1)
+          )}
+        </div>,
+        document.body
+      )}
+
+      {/* 3. Screen Modal Overlay (Hidden automatically during print) */}
+      <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
         
         {/* Main Modal Shell */}
-        <div className="relative w-full max-w-5xl bg-white text-slate-900 rounded-2xl shadow-2xl overflow-hidden max-h-[96vh] flex flex-col print:max-h-none print:shadow-none print:rounded-none print:m-0 print:p-0 print:w-full print:border-none print:overflow-visible">
+        <div className="relative w-full max-w-5xl bg-white text-slate-900 rounded-2xl shadow-2xl overflow-hidden max-h-[96vh] flex flex-col">
           
-          {/* Floating Top Control Toolbar (Hidden during print) */}
-          <div className="no-print bg-slate-900 text-white px-6 py-4 flex items-center justify-between border-b border-slate-800 shrink-0">
+          {/* Top Control Toolbar */}
+          <div className="bg-slate-900 text-white px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
                 <Award className="w-6 h-6" />
@@ -347,23 +686,33 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
                 </h2>
                 <p className="text-xs text-slate-400">
                   {displaySheets.length > 1
-                    ? `Class Batch Print Preview (${displaySheets.length} Learners · ${classInfo?.name || 'Class'})`
+                    ? `Class Batch Preview (${displaySheets.length} Learners · ${classInfo?.name || 'Class'})`
                     : `${displaySheets[0]?.student.first_name} ${displaySheets[0]?.student.last_name} • ${classInfo?.name || 'Class'} • ${termInfo?.name || 'Current Term'}`}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <button
                 onClick={handlePrint}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl shadow-lg transition-all"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-md transition-all"
               >
                 <Printer className="w-4 h-4" />
-                <span>Print A4 Dossier {displaySheets.length > 1 ? `(${displaySheets.length} Students)` : ''}</span>
+                <span>Print A4 Dossier {displaySheets.length > 1 ? `(${displaySheets.length})` : ''}</span>
               </button>
+
+              <button
+                onClick={handleOpenPrintTab}
+                title="Opens the document in a clean new tab for full-screen inspection or browser PDF saving"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open in Tab</span>
+              </button>
+
               <button
                 onClick={onClose}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors ml-1"
                 title="Close modal"
               >
                 <X className="w-5 h-5" />
@@ -371,371 +720,14 @@ export const FormalReportCardModal: React.FC<ReportCardModalProps> = ({
             </div>
           </div>
 
-          {/* Printable Document Canvas */}
+          {/* Interactive Screen Preview */}
           <div
-            id="formal-report-dossier-print"
-            ref={printRef}
-            className="overflow-y-auto flex-1 p-4 sm:p-8 bg-slate-100 print:bg-white print:p-0 print:overflow-visible"
+            id="formal-report-dossier-preview"
+            className="overflow-y-auto flex-1 p-4 sm:p-8 bg-slate-100"
           >
-            {displaySheets.map((sheet, sheetIdx) => {
-              const isLast = sheetIdx === displaySheets.length - 1;
-              const stu = sheet.student;
-              const summary = sheet.summary;
-              const att = sheet.attendance;
-
-              const stuId = stu.id || stu.child_id || sheet.enrollmentId || '';
-              const uniqueIdentifier =
-                stu.child_unique_id ||
-                stu.nin ||
-                stu.am2050_id ||
-                (stuId ? `NG-STU-${stuId.slice(-6).toUpperCase()}` : 'NG-STU-001');
-
-              return (
-                <div
-                  key={stuId || sheetIdx}
-                  className={`dossier-sheet-page bg-white text-slate-900 border border-slate-300 shadow-md p-8 sm:p-10 mx-auto max-w-[210mm] min-h-[297mm] ${
-                    !isLast ? 'mb-8' : ''
-                  }`}
-                >
-                  {/* UPPER HALF: HEADER, BIODATA, COGNITIVE DOMAIN, AFFECTIVE DOMAIN */}
-                  <div>
-                    {/* 1. OFFICIAL ACADEMIC HEADER */}
-                    <div className="border-b-4 border-double border-emerald-800 pb-4 mb-5">
-                      <div className="flex items-center justify-between gap-4">
-                        {/* Left: Coat of Arms / SUBEB Emblem */}
-                        <div className="w-20 h-20 shrink-0 flex flex-col items-center justify-center p-1 border border-slate-200 rounded-lg bg-emerald-50">
-                          <div className="w-10 h-10 rounded-full bg-emerald-700 text-white flex items-center justify-center font-black text-xs shadow-sm">
-                            UBEC
-                          </div>
-                          <span className="text-[9px] uppercase tracking-tighter text-emerald-900 font-bold mt-1 text-center leading-none">
-                            Jigawa SUBEB
-                          </span>
-                        </div>
-
-                        {/* Center: Institutional Identity */}
-                        <div className="text-center flex-1">
-                          <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-600">
-                            Federal Republic of Nigeria • State Universal Basic Education Board
-                          </div>
-                          <h1 className="text-2xl sm:text-3xl font-black uppercase text-emerald-900 tracking-tight my-0.5">
-                            {schoolName}
-                          </h1>
-                          <div className="text-xs font-semibold text-slate-700">
-                            School Registry Code: <span className="font-mono text-emerald-800 font-bold">{schoolCode}</span> • LGA: <span className="font-bold">{schoolLga}</span> • State: <span className="font-bold">{schoolState}</span> (Ward: {schoolWard})
-                          </div>
-                          <div className="inline-block mt-2 px-4 py-1 bg-emerald-800 text-white text-xs font-bold uppercase tracking-wider rounded-md shadow-sm">
-                            Continuous Assessment (40%) & Terminal Examination (60%) Dossier
-                          </div>
-                        </div>
-
-                        {/* Right: AM2050 Biometric / Registry Badge */}
-                        <div className="w-20 h-20 shrink-0 flex flex-col items-center justify-center p-1 border border-slate-200 rounded-lg bg-slate-50">
-                          <div className="w-10 h-10 rounded-lg bg-slate-800 text-emerald-400 flex items-center justify-center font-black text-xs shadow-sm">
-                            AM2050
-                          </div>
-                          <span className="text-[9px] uppercase tracking-tighter text-slate-600 font-bold mt-1 text-center leading-none">
-                            Pilot Jigawa
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 2. STUDENT BIODATA & ENROLLMENT BANNER */}
-                    <div className="bg-slate-50 border border-slate-300 rounded-lg p-3.5 mb-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Learner Full Name</span>
-                        <span className="font-bold text-slate-900 text-sm uppercase">
-                          {stu.last_name}, {stu.first_name}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">AM2050 Learner ID / NIN</span>
-                        <span className="font-mono font-bold text-emerald-900">
-                          {uniqueIdentifier}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Class & Arm</span>
-                        <span className="font-bold text-slate-900">
-                          {classInfo?.name || 'JSS 1'}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Academic Session & Term</span>
-                        <span className="font-bold text-slate-900">
-                          {termInfo?.name || 'First Term 2026/2027'}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Gender</span>
-                        <span className="font-semibold text-slate-800 capitalize">
-                          {stu.gender || 'Not Specified'}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Class Form Teacher</span>
-                        <span className="font-semibold text-slate-800">
-                          {classInfo?.teacherName || 'Assigned Form Master'}
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Attendance Record</span>
-                        <span className="font-semibold text-slate-800 font-mono">
-                          {att.present} of {att.total || 60} days ({att.rate}%)
-                        </span>
-                      </div>
-
-                      <div>
-                        <span className="text-slate-500 font-medium block text-[10px] uppercase">Official Status</span>
-                        <span className={`inline-flex items-center gap-1 font-bold uppercase text-[11px] ${
-                          summary.status === 'published' ? 'text-emerald-700' : 'text-amber-700'
-                        }`}>
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          {summary.status === 'published' ? 'Officially Certified' : 'Provisional Draft'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* 3. COGNITIVE DOMAIN / ACADEMIC PERFORMANCE TABLE */}
-                    <div className="mb-5">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
-                          <BookOpen className="w-4 h-4 text-emerald-700" />
-                          Part I: Cognitive Assessment & Terminal Examination Scores
-                        </h3>
-                        <span className="text-[10px] text-slate-500 font-medium">
-                          Universal Basic Education Weighting: Continuous Assessment (40%) + Terminal Exam (60%) = Total (100%)
-                        </span>
-                      </div>
-
-                      <table className="w-full text-left text-xs border border-collapse border-slate-300">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-300">
-                            <th className="py-2 px-2.5 border-r border-slate-300 w-8 text-center">#</th>
-                            <th className="py-2 px-3 border-r border-slate-300">Subject Name</th>
-                            <th className="py-2 px-2 border-r border-slate-300 text-center w-16">C.A. (40)</th>
-                            <th className="py-2 px-2 border-r border-slate-300 text-center w-16">Exam (60)</th>
-                            <th className="py-2 px-2 border-r border-slate-300 text-center w-16 bg-slate-200/60 font-black">Total (100)</th>
-                            <th className="py-2 px-2 border-r border-slate-300 text-center w-12">Grade</th>
-                            <th className="py-2 px-2 border-r border-slate-300 text-center w-20">Class Avg</th>
-                            <th className="py-2 px-3">Subject Teacher Remarks</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                          {sheet.results && sheet.results.length > 0 ? (
-                            sheet.results.map((res, idx) => {
-                              const ca = res.caScore !== null && res.caScore !== undefined ? Number(res.caScore) : '-';
-                              const exam = res.examScore !== null && res.examScore !== undefined ? Number(res.examScore) : '-';
-                              const total = Number(res.score);
-                              const grade = res.grade || '-';
-                              const classAvg = res.stats?.avg !== undefined ? `${res.stats.avg}%` : '-';
-                              const remark = res.notes || getGradeRemark(grade);
-
-                              return (
-                                <tr key={res.subject || idx} className={idx % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'}>
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 text-center text-slate-400 font-mono text-[11px]">
-                                    {idx + 1}
-                                  </td>
-                                  <td className="py-1.5 px-3 border-r border-slate-200 font-bold text-slate-800">
-                                    {res.subject}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-slate-200 text-center font-mono text-slate-700">
-                                    {ca}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-slate-200 text-center font-mono text-slate-700">
-                                    {exam}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-slate-200 text-center font-mono font-black text-slate-900 bg-slate-100/50">
-                                    {total}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-slate-200 text-center">
-                                    <span className={`inline-block px-1.5 py-0.5 rounded font-black text-[11px] border ${getGradeColor(grade)}`}>
-                                      {grade}
-                                    </span>
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-slate-200 text-center font-mono text-slate-500 text-[11px]">
-                                    {classAvg}
-                                  </td>
-                                  <td className="py-1.5 px-3 text-slate-600 text-[11px] italic">
-                                    {remark}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td colSpan={8} className="py-4 text-center text-slate-400 italic">
-                                No subject evaluations recorded for this learner.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                        <tfoot>
-                          <tr className="bg-emerald-50/80 font-black text-slate-900 border-t-2 border-emerald-800">
-                            <td colSpan={2} className="py-2.5 px-3 border-r border-slate-300 text-right uppercase text-[11px]">
-                              Cumulative Terminal Summary:
-                            </td>
-                            <td colSpan={2} className="py-2.5 px-2 border-r border-slate-300 text-center font-mono text-xs">
-                              {summary.subjectCount} Subjects Evaluated
-                            </td>
-                            <td className="py-2.5 px-2 border-r border-slate-300 text-center font-mono text-sm font-black text-emerald-900 bg-emerald-100/60">
-                              {summary.totalScore}
-                            </td>
-                            <td className="py-2.5 px-2 border-r border-slate-300 text-center">
-                              <span className={`inline-block px-2 py-0.5 rounded font-black text-xs border ${getGradeColor(summary.overallGrade)}`}>
-                                {summary.overallGrade}
-                              </span>
-                            </td>
-                            <td colSpan={2} className="py-2.5 px-3">
-                              <div className="flex items-center justify-between text-xs">
-                                <span>Terminal Average: <strong className="font-mono text-emerald-900">{summary.averageScore}%</strong></span>
-                                <span>Class Standing: <strong className="font-black text-emerald-900 bg-emerald-200/70 px-2 py-0.5 rounded">{summary.positionText || 'Evaluated'}</strong></span>
-                              </div>
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-
-                    {/* 4. AFFECTIVE & BEHAVIORAL DOMAIN EVALUATION */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-                      {/* Behavioral Attributes */}
-                      <div className="border border-slate-300 rounded-lg p-3 bg-slate-50">
-                        <h4 className="text-[11px] font-black uppercase text-slate-800 mb-2 border-b border-slate-200 pb-1 flex items-center justify-between">
-                          <span>Part II: Affective & Behavioral Traits</span>
-                          <span className="text-[9px] text-slate-500 font-normal">Scale: 5 (Excellent) to 1 (Poor)</span>
-                        </h4>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
-                          {[
-                            { name: 'Punctuality & Regularity', rating: 5 },
-                            { name: 'Neatness & Assembly Posture', rating: 5 },
-                            { name: 'Classroom Attentiveness', rating: summary.averageScore >= 60 ? 5 : 4 },
-                            { name: 'Peer Respect & Teamwork', rating: 4 },
-                            { name: 'Honesty & Integrity', rating: 5 },
-                            { name: 'Leadership & Extracurricular', rating: 4 },
-                          ].map((trait) => (
-                            <div key={trait.name} className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
-                              <span className="text-slate-700">{trait.name}</span>
-                              <span className="font-mono font-bold text-emerald-800">
-                                {'★'.repeat(trait.rating)} ({trait.rating})
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Grading Scale Legend */}
-                      <div className="border border-slate-300 rounded-lg p-3 bg-slate-50">
-                        <h4 className="text-[11px] font-black uppercase text-slate-800 mb-2 border-b border-slate-200 pb-1">
-                          UBEC Standard Assessment Grading Key
-                        </h4>
-                        <table className="w-full text-left text-[10px] border-collapse">
-                          <thead>
-                            <tr className="text-slate-500 border-b border-slate-200 font-bold">
-                              <th className="pb-1">Range</th>
-                              <th className="pb-1">Grade</th>
-                              <th className="pb-1">Classification</th>
-                              <th className="pb-1">Remark</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 text-slate-700">
-                            <tr><td className="py-0.5 font-mono">75% - 100%</td><td className="font-bold text-emerald-800">A</td><td>Excellent</td><td>Distinction</td></tr>
-                            <tr><td className="py-0.5 font-mono">65% - 74%</td><td className="font-bold text-blue-800">B</td><td>Very Good</td><td>Commendable</td></tr>
-                            <tr><td className="py-0.5 font-mono">50% - 64%</td><td className="font-bold text-amber-800">C</td><td>Good</td><td>Credit</td></tr>
-                            <tr><td className="py-0.5 font-mono">40% - 49%</td><td className="font-bold text-orange-800">D</td><td>Fair</td><td>Pass</td></tr>
-                            <tr><td className="py-0.5 font-mono">0% - 39%</td><td className="font-bold text-rose-800">F</td><td>Unsatisfactory</td><td>Requires Intervention</td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* LOWER HALF: ATTESTATIONS, REMARKS, OFFICIAL SEAL & FOOTER */}
-                  <div className="border-t-2 border-slate-300 pt-4 mt-2">
-                    <div className="grid grid-cols-2 gap-6 text-xs mb-4">
-                      {/* Form Teacher Remark */}
-                      <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/70">
-                        <span className="text-[10px] font-bold uppercase text-slate-500 block mb-1">
-                          Class Form Master's Recommendation:
-                        </span>
-                        <p className="italic text-slate-800 font-medium min-h-[32px] text-xs">
-                          {summary.averageScore >= 70
-                            ? `An exceptional academic performance. Demonstrates disciplined mastery across basic science and humanities. Promoted with commendable honors.`
-                            : summary.averageScore >= 50
-                            ? `A very creditable result with consistent classroom engagement. Capable of distinction with dedicated focus on exam preparation.`
-                            : `Demonstrates potential. Recommended for targeted literacy and remedial math mentoring in the coming term.`}
-                        </p>
-                        <div className="mt-3 pt-2 border-t border-slate-300 flex items-center justify-between text-[11px]">
-                          <div>
-                            <span className="font-serif italic font-bold text-slate-700">
-                              {classInfo?.teacherName || 'Suleiman Ibrahim'}
-                            </span>
-                            <span className="text-slate-400 block text-[9px] uppercase">Form Master Signature</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="font-mono text-slate-600">{termInfo?.endDate || '2026-12-18'}</span>
-                            <span className="text-slate-400 block text-[9px] uppercase">Date Certified</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Headmaster / Principal Remark & Official Stamp */}
-                      <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/70 relative">
-                        <span className="text-[10px] font-bold uppercase text-slate-500 block mb-1">
-                          Headmaster / Principal's Attestation:
-                        </span>
-                        <p className="italic text-slate-800 font-medium min-h-[32px] text-xs">
-                          {summary.decision === 'PASSED'
-                            ? `Results verified and approved. Promoted with commendable standing to the subsequent academic level.`
-                            : `Results verified. Academic advisory issued; guardian conference scheduled.`}
-                        </p>
-
-                        {/* Simulated Official Seal Stamp */}
-                        <div className="absolute right-4 top-2 pointer-events-none opacity-80 rotate-[-8deg] border-2 border-dashed border-emerald-700 rounded-full w-20 h-20 flex flex-col items-center justify-center p-1 text-center">
-                          <span className="text-[7px] font-black text-emerald-800 uppercase leading-none">OFFICIAL SEAL</span>
-                          <span className="text-[8px] font-black text-emerald-900 leading-tight">GDJSS AHOTO</span>
-                          <span className="text-[6px] font-bold text-emerald-700">SUBEB JIGAWA</span>
-                        </div>
-
-                        <div className="mt-3 pt-2 border-t border-slate-300 flex items-center justify-between text-[11px]">
-                          <div>
-                            <span className="font-serif italic font-bold text-slate-800">
-                              Mallam Usman Bello Ahoto
-                            </span>
-                            <span className="text-slate-400 block text-[9px] uppercase">Headmaster Signature & Stamp</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="font-mono text-slate-600">{termInfo?.endDate || '2026-12-18'}</span>
-                            <span className="text-slate-400 block text-[9px] uppercase">Date Sealed</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Resumption Notice & Footer Security Ledger */}
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-200 pt-2 font-medium">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>Next Term Resumption Date: <strong className="text-slate-900 font-semibold">{termInfo?.nextTermBegins || 'Monday, 11th January 2027'}</strong></span>
-                      </div>
-                      <div>
-                        <span>Digital Verification Hash: <strong className="font-mono text-slate-700">{(stuId || 'AM2050').slice(0, 10).toUpperCase()}-VERIFIED-AM2050-JIGAWA</strong></span>
-                      </div>
-                      <div>
-                        <span>Universal Basic Education Board • Jigawa State</span>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-              );
-            })}
+            {displaySheets.map((sheet, sheetIdx) =>
+              renderSheetContent(sheet, sheetIdx, sheetIdx === displaySheets.length - 1)
+            )}
           </div>
 
         </div>

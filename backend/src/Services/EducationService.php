@@ -32,9 +32,381 @@ final class EducationService {
   public function approveEnrollment(array $auth,string $id):array{$record=$this->one($this->db->pdo(),'enrollments',$id);$this->assertSchool($auth,$record['school_id']);$this->db->pdo()->prepare('UPDATE enrollments SET approved_by=:user,approved_at=CURRENT_TIMESTAMP WHERE id=:id')->execute(['user'=>$auth['id'],'id'=>$id]);$after=$this->one($this->db->pdo(),'enrollments',$id);$this->audit->record($auth['id'],'APPROVE','enrollment',$id,$record,$after);return $after;}
   public function transitionEnrollment(array $auth,string $id,array $data):array{$before=$this->one($this->db->pdo(),'enrollments',$id);$this->assertSchool($auth,$before['school_id']);if($before['enrollment_status']!=='active')throw new RuntimeException('Only an active enrollment can be transferred or withdrawn.');$status=(string)($data['status']??'');if(!in_array($status,['transferred','withdrawn'],true))throw new RuntimeException('Choose transfer or withdrawal.');$reason=trim((string)($data['reason']??''));$date=(string)($data['effectiveDate']??'');$receiving=trim((string)($data['receivingSchoolName']??''));$receivingId=trim((string)($data['receivingSchoolId']??''));if($reason===''||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$date))throw new RuntimeException('Provide a transition reason and effective date.');if($status==='transferred'&&$receivingId!==''){$dest=$this->registeredTransferDestination($auth,$receivingId);$receiving=$dest['school_name'];}if($status==='transferred'&&$receiving==='')throw new RuntimeException('Select a registered receiving school or record the unlisted school name for a transfer certificate.');return $this->db->transaction(function(PDO $pdo)use($auth,$id,$status,$reason,$date,$receiving,$receivingId,$before){$pdo->prepare('UPDATE enrollments SET enrollment_status=:status,transition_reason=:reason,transition_effective_date=:date,receiving_school_name=:receiving,receiving_school_id=:receivingId,transitioned_by=:actor,transitioned_at=CURRENT_TIMESTAMP WHERE id=:id')->execute(['status'=>$status,'reason'=>$reason,'date'=>$date,'receiving'=>$status==='transferred'?$receiving:null,'receivingId'=>$status==='transferred'&&$receivingId!==''?$receivingId:null,'actor'=>$auth['id'],'id'=>$id]);$after=$this->one($pdo,'enrollments',$id);$this->createGuardianCertificateAlert($pdo,$auth,$after,$status);$this->audit->record($auth['id'],strtoupper($status),'enrollment',$id,$before,$after);return$this->enrollmentDocumentRecord($auth,$id);});}
   public function outputEnrollmentDocument(array $auth,string $id,string $type):never{$record=$this->enrollmentDocumentRecord($auth,$id);if($type==='transfer'&&$record['enrollment_status']!=='transferred')throw new RuntimeException('A transfer certificate is available only after a recorded transfer.');if($type==='withdrawal'&&$record['enrollment_status']!=='withdrawn')throw new RuntimeException('A withdrawal certificate is available only after a recorded withdrawal.');$signature=$type==='enrollment'?($record['approved_signature_data']??null):($record['transition_signature_data']??null);if($signature){$this->renderSignedEnrollmentPdf($record,$type,(string)$signature);}$this->renderEnrollmentPdf($record,$type);}
-  public function attendance(array $auth,array $query):array{$from='attendance a INNER JOIN schools s ON s.id=a.school_id';return $this->scopedList($auth,$from,'s.ward_id','s.id','a.class_id','a.*','a.date DESC',$query);}
-  public function recordAttendance(array $auth,array $data):array{foreach(['childId','schoolId','date']as$key){if(empty($data[$key]))throw new RuntimeException("{$key} is required.");}$this->assertSchool($auth,$data['schoolId']);if(!empty($data['classId']))$this->assertClassForSchool($auth,$data['classId'],$data['schoolId']);if(($auth['assigned_scope_type']??null)==='class'&&empty($data['classId']))throw new RuntimeException('A class is required for class-scoped attendance.');$this->assertChildInSchoolScope($auth,$data['childId'],$data['schoolId']);$pdo=$this->db->pdo();$lookup=$pdo->prepare('SELECT id FROM attendance WHERE child_id=:child AND date=:date');$lookup->execute(['child'=>$data['childId'],'date'=>$data['date']]);$id=$lookup->fetchColumn()?:Ulids::make();$pdo->prepare('INSERT INTO attendance (id,child_id,school_id,class_id,date,attendance_status,scanned_by) VALUES (:id,:child,:school,:class,:date,:status,:user) ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),class_id=VALUES(class_id),attendance_status=VALUES(attendance_status),scanned_by=VALUES(scanned_by)')->execute(['id'=>$id,'child'=>$data['childId'],'school'=>$data['schoolId'],'class'=>$data['classId']??null,'date'=>$data['date'],'status'=>$data['attendanceStatus']??'present','user'=>$auth['id']]);$r=$this->one($pdo,'attendance',$id);$this->audit->record($auth['id'],'UPSERT','attendance',$id,null,$r);return $r;}
-  public function scanAttendance(array $auth,array $data):array{$raw=trim((string)($data['qrToken']??''));$token=str_starts_with($raw,'AM2050:')?substr($raw,7):$raw;if(!preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/',$token))throw new RuntimeException('This QR code is not an AM2050 child attendance token.');$pdo=$this->db->pdo();$child=$pdo->prepare('SELECT id FROM children WHERE attendance_qr_token=:token LIMIT 1');$child->execute(['token'=>$token]);$childId=$child->fetchColumn();if(!$childId)throw new RuntimeException('The QR code does not match an active AM2050 child record.');$placement=$pdo->prepare("SELECT school_id,class_id FROM enrollments WHERE child_id=:child AND enrollment_status='active' ORDER BY enrollment_date DESC LIMIT 1");$placement->execute(['child'=>$childId]);$enrollment=$placement->fetch();if(!$enrollment)throw new RuntimeException('This child has no active school enrollment.');if(!empty($data['schoolId'])&&(string)$data['schoolId']!==$enrollment['school_id'])throw new RuntimeException('The scanned child is not enrolled in the selected school.');if(!empty($data['classId'])&&(string)$data['classId']!==($enrollment['class_id']??''))throw new RuntimeException('The scanned child is not assigned to the selected class.');return $this->recordAttendance($auth,['childId'=>$childId,'schoolId'=>$enrollment['school_id'],'classId'=>$enrollment['class_id'],'date'=>$data['date']??date('Y-m-d'),'attendanceStatus'=>$data['attendanceStatus']??'present']);}
+  public function attendance(array $auth, array $query): array {
+    $from = 'attendance a INNER JOIN schools s ON s.id=a.school_id INNER JOIN children c ON c.id=a.child_id LEFT JOIN school_classes sc ON sc.id=a.class_id LEFT JOIN users u ON u.id=a.recorded_by';
+    [$scope, $params] = $this->scopeForEducation($auth, 's.ward_id', 's.id', 'a.class_id');
+    $where = ' WHERE 1=1' . $scope;
+
+    if (!empty($query['date'])) {
+        $where .= ' AND a.date = :f_date';
+        $params['f_date'] = $query['date'];
+    }
+    if (!empty($query['class_id']) || !empty($query['classId'])) {
+        $where .= ' AND a.class_id = :f_class';
+        $params['f_class'] = $query['class_id'] ?? $query['classId'];
+    }
+    if (!empty($query['school_id']) || !empty($query['schoolId'])) {
+        $where .= ' AND a.school_id = :f_school';
+        $params['f_school'] = $query['school_id'] ?? $query['schoolId'];
+    }
+    if (!empty($query['attendance_status']) || !empty($query['status'])) {
+        $where .= ' AND a.attendance_status = :f_status';
+        $params['f_status'] = $query['attendance_status'] ?? $query['status'];
+    }
+    if (!empty($query['search'])) {
+        $where .= ' AND (c.first_name LIKE :f_q OR c.last_name LIKE :f_q OR c.child_unique_id LIKE :f_q)';
+        $params['f_q'] = '%' . trim((string)$query['search']) . '%';
+    }
+
+    $page = max(1, (int)($query['page'] ?? 1));
+    $limit = min(500, max(1, (int)($query['limit'] ?? 50)));
+    $offset = ($page - 1) * $limit;
+
+    $pdo = $this->db->pdo();
+    $count = $pdo->prepare('SELECT COUNT(*) FROM ' . $from . $where);
+    $count->execute($params);
+    $total = (int)$count->fetchColumn();
+
+    $select = 'a.*, c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url, c.guardian_phone, s.school_name, sc.class_name, sc.class_level, u.name AS recorded_by_name';
+    $stmt = $pdo->prepare('SELECT ' . $select . ' FROM ' . $from . $where . ' ORDER BY a.date DESC, sc.class_name ASC, c.last_name ASC LIMIT :limit OFFSET :offset');
+    foreach ($params as $k => $v) $stmt->bindValue(':' . $k, $v);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+
+    return ['data' => $stmt->fetchAll(), 'page' => $page, 'limit' => $limit, 'total' => $total];
+  }
+
+  public function recordAttendance(array $auth,array $data):array{
+    foreach(['childId','schoolId','date']as$key){if(empty($data[$key]))throw new RuntimeException("{$key} is required.");}
+    $this->assertSchool($auth,$data['schoolId']);
+    if(!empty($data['classId']))$this->assertClassForSchool($auth,$data['classId'],$data['schoolId']);
+    if(($auth['assigned_scope_type']??null)==='class'&&empty($data['classId']))throw new RuntimeException('A class is required for class-scoped attendance.');
+    $this->assertChildInSchoolScope($auth,$data['childId'],$data['schoolId']);
+    $pdo=$this->db->pdo();
+    $lookup=$pdo->prepare('SELECT id FROM attendance WHERE child_id=:child AND date=:date');
+    $lookup->execute(['child'=>$data['childId'],'date'=>$data['date']]);
+    $id=$lookup->fetchColumn()?:Ulids::make();
+    $notes = !empty($data['notes']) ? mb_substr(trim((string)$data['notes']), 0, 255) : null;
+    $pdo->prepare('INSERT INTO attendance (id,child_id,school_id,class_id,date,attendance_status,notes,scanned_by,recorded_by) VALUES (:id,:child,:school,:class,:date,:status,:notes,:scanner,:recorder) ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),class_id=VALUES(class_id),attendance_status=VALUES(attendance_status),notes=VALUES(notes),scanned_by=VALUES(scanned_by),recorded_by=VALUES(recorded_by)')->execute([
+      'id'=>$id,
+      'child'=>$data['childId'],
+      'school'=>$data['schoolId'],
+      'class'=>$data['classId']??null,
+      'date'=>$data['date'],
+      'status'=>$data['attendanceStatus']??'present',
+      'notes'=>$notes,
+      'scanner'=>$data['scannedBy']??null,
+      'recorder'=>$auth['id']
+    ]);
+    $r=$this->one($pdo,'attendance',$id);
+    $this->audit->record($auth['id'],'UPSERT','attendance',$id,null,$r);
+    return $r;
+  }
+
+  public function batchRecordAttendance(array $auth, array $data): array {
+    $schoolId = (string)($data['schoolId'] ?? '');
+    $classId = (string)($data['classId'] ?? '');
+    $date = (string)($data['date'] ?? date('Y-m-d'));
+    $records = (array)($data['records'] ?? []);
+    if (!$schoolId || !$date) {
+        throw new RuntimeException('School ID and Date are required.');
+    }
+    $this->assertSchool($auth, $schoolId);
+    if ($classId !== '') {
+        $this->assertClassForSchool($auth, $classId, $schoolId);
+    }
+    if (empty($records)) {
+        throw new RuntimeException('No attendance records provided in batch.');
+    }
+
+    $pdo = $this->db->pdo();
+    $savedCount = 0;
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO attendance (id, child_id, school_id, class_id, date, attendance_status, notes, recorded_by)
+             VALUES (:id, :child, :school, :class, :date, :status, :notes, :user)
+             ON DUPLICATE KEY UPDATE
+                school_id = VALUES(school_id),
+                class_id = VALUES(class_id),
+                attendance_status = VALUES(attendance_status),
+                notes = VALUES(notes),
+                recorded_by = VALUES(recorded_by)'
+        );
+
+        foreach ($records as $row) {
+            $childId = (string)($row['childId'] ?? '');
+            if (!$childId) continue;
+            $rawStatus = (string)($row['attendanceStatus'] ?? $row['status'] ?? 'present');
+            $status = in_array($rawStatus, ['present', 'absent', 'late', 'excused'], true) ? $rawStatus : 'present';
+            $notes = !empty($row['notes']) ? mb_substr(trim((string)$row['notes']), 0, 255) : null;
+            $id = Ulids::make();
+
+            $stmt->execute([
+                'id' => $id,
+                'child' => $childId,
+                'school' => $schoolId,
+                'class' => $classId !== '' ? $classId : null,
+                'date' => $date,
+                'status' => $status,
+                'notes' => $notes,
+                'user' => $auth['id'],
+            ]);
+            $savedCount++;
+        }
+        $pdo->commit();
+    } catch (\Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+
+    $this->audit->record($auth['id'], 'BATCH_UPSERT', 'attendance', $classId ?: $schoolId, null, [
+        'date' => $date,
+        'schoolId' => $schoolId,
+        'classId' => $classId,
+        'savedCount' => $savedCount
+    ]);
+
+    return [
+        'savedCount' => $savedCount,
+        'date' => $date,
+        'schoolId' => $schoolId,
+        'classId' => $classId
+    ];
+  }
+
+  public function scanAttendance(array $auth,array $data):array{$raw=trim((string)($data['qrToken']??''));$token=str_starts_with($raw,'AM2050:')?substr($raw,7):$raw;if(!preg_match('/^[0-9A-HJKMNP-TV-Z]{26}$/',$token))throw new RuntimeException('This QR code is not an AM2050 child attendance token.');$pdo=$this->db->pdo();$child=$pdo->prepare('SELECT id FROM children WHERE attendance_qr_token=:token LIMIT 1');$child->execute(['token'=>$token]);$childId=$child->fetchColumn();if(!$childId)throw new RuntimeException('The QR code does not match an active AM2050 child record.');$placement=$pdo->prepare("SELECT school_id,class_id FROM enrollments WHERE child_id=:child AND enrollment_status='active' ORDER BY enrollment_date DESC LIMIT 1");$placement->execute(['child'=>$childId]);$enrollment=$placement->fetch();if(!$enrollment)throw new RuntimeException('This child has no active school enrollment.');if(!empty($data['schoolId'])&&(string)$data['schoolId']!==$enrollment['school_id'])throw new RuntimeException('The scanned child is not enrolled in the selected school.');if(!empty($data['classId'])&&(string)$data['classId']!==($enrollment['class_id']??''))throw new RuntimeException('The scanned child is not assigned to the selected class.');return $this->recordAttendance($auth,['childId'=>$childId,'schoolId'=>$enrollment['school_id'],'classId'=>$enrollment['class_id'],'date'=>$data['date']??date('Y-m-d'),'attendanceStatus'=>$data['attendanceStatus']??'present','notes'=>$data['notes']??null,'scannedBy'=>$auth['id']]);}
+
+  public function attendanceMatrix(array $auth, array $query): array {
+    $classId = (string)($query['class_id'] ?? $query['classId'] ?? '');
+    if (!$classId) {
+        throw new RuntimeException('Class ID is required for attendance matrix.');
+    }
+    $this->assertClass($auth, $classId);
+
+    $month = (string)($query['month'] ?? date('Y-m'));
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        $month = date('Y-m');
+    }
+
+    $startDate = "{$month}-01";
+    $daysInMonth = (int)date('t', strtotime($startDate));
+    $endDate = date('Y-m-d', strtotime("{$startDate} + " . ($daysInMonth - 1) . " days"));
+
+    $pdo = $this->db->pdo();
+
+    $classStmt = $pdo->prepare(
+        'SELECT sc.*, s.school_name, s.ward_id, u.name AS teacher_name
+         FROM school_classes sc
+         INNER JOIN schools s ON s.id = sc.school_id
+         LEFT JOIN users u ON u.id = sc.teacher_id
+         WHERE sc.id = :id'
+    );
+    $classStmt->execute(['id' => $classId]);
+    $classInfo = $classStmt->fetch();
+    if (!$classInfo) {
+        throw new RuntimeException('Class not found.');
+    }
+
+    $enrStmt = $pdo->prepare(
+        "SELECT e.id AS enrollment_id, c.id AS child_id, c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url
+         FROM enrollments e
+         INNER JOIN children c ON c.id = e.child_id
+         WHERE e.class_id = :class_id AND e.enrollment_status = 'active'
+         ORDER BY c.gender ASC, c.last_name ASC, c.first_name ASC"
+    );
+    $enrStmt->execute(['class_id' => $classId]);
+    $students = $enrStmt->fetchAll();
+
+    $attStmt = $pdo->prepare(
+        'SELECT child_id, date, attendance_status, notes
+         FROM attendance
+         WHERE class_id = :class_id AND date BETWEEN :start AND :end'
+    );
+    $attStmt->execute(['class_id' => $classId, 'start' => $startDate, 'end' => $endDate]);
+    $attRows = $attStmt->fetchAll();
+
+    $attMap = [];
+    foreach ($attRows as $row) {
+        $cid = $row['child_id'];
+        $d = $row['date'];
+        $attMap[$cid][$d] = [
+            'status' => $row['attendance_status'],
+            'notes' => $row['notes']
+        ];
+    }
+
+    $schoolDays = [];
+    for ($i = 1; $i <= $daysInMonth; $i++) {
+        $dayStr = sprintf('%s-%02d', $month, $i);
+        $w = (int)date('w', strtotime($dayStr));
+        $hasRecord = false;
+        foreach ($attRows as $r) {
+            if ($r['date'] === $dayStr) { $hasRecord = true; break; }
+        }
+        if (($w >= 1 && $w <= 5) || $hasRecord) {
+            $schoolDays[] = $dayStr;
+        }
+    }
+
+    $matrixRows = [];
+    foreach ($students as $stu) {
+        $cid = $stu['child_id'];
+        $daysData = [];
+        $present = 0; $absent = 0; $late = 0; $excused = 0;
+        foreach ($schoolDays as $day) {
+            $rec = $attMap[$cid][$day] ?? null;
+            if ($rec) {
+                $st = $rec['status'];
+                $daysData[$day] = [
+                    'status' => $st,
+                    'notes' => $rec['notes']
+                ];
+                if ($st === 'present') $present++;
+                elseif ($st === 'late') $late++;
+                elseif ($st === 'absent') $absent++;
+                elseif ($st === 'excused') $excused++;
+            } else {
+                $daysData[$day] = null;
+            }
+        }
+        $totalRecorded = $present + $late + $absent + $excused;
+        $rate = $totalRecorded > 0 ? round((($present + $late) / $totalRecorded) * 100, 1) : 100.0;
+
+        $matrixRows[] = [
+            'student' => $stu,
+            'attendance' => $daysData,
+            'summary' => [
+                'present' => $present,
+                'late' => $late,
+                'absent' => $absent,
+                'excused' => $excused,
+                'totalRecorded' => $totalRecorded,
+                'attendanceRate' => $rate,
+                'isChronic' => ($totalRecorded >= 5 && $rate < 75.0) || $absent >= 4
+            ]
+        ];
+    }
+
+    return [
+        'class' => $classInfo,
+        'month' => $month,
+        'startDate' => $startDate,
+        'endDate' => $endDate,
+        'schoolDays' => $schoolDays,
+        'totalSchoolDays' => count($schoolDays),
+        'students' => $matrixRows
+    ];
+  }
+
+  public function attendanceStats(array $auth, array $query): array {
+    $schoolId = (string)($query['school_id'] ?? $query['schoolId'] ?? (($auth['assigned_scope_type'] ?? '') === 'school' ? $auth['assigned_scope_id'] : ''));
+    $classId = (string)($query['class_id'] ?? $query['classId'] ?? '');
+    $date = (string)($query['date'] ?? date('Y-m-d'));
+    $pdo = $this->db->pdo();
+
+    $whereClass = '';
+    $params = ['date' => $date];
+    if ($classId !== '') {
+        $whereClass = ' AND a.class_id = :class_id';
+        $params['class_id'] = $classId;
+    } elseif ($schoolId !== '') {
+        $whereClass = ' AND a.school_id = :school_id';
+        $params['school_id'] = $schoolId;
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT a.attendance_status, COUNT(*) as count
+         FROM attendance a
+         WHERE a.date = :date {$whereClass}
+         GROUP BY a.attendance_status"
+    );
+    $stmt->execute($params);
+    $counts = ['present' => 0, 'late' => 0, 'absent' => 0, 'excused' => 0];
+    foreach ($stmt->fetchAll() as $row) {
+        $counts[$row['attendance_status']] = (int)$row['count'];
+    }
+    $totalMarked = array_sum($counts);
+    $rate = $totalMarked > 0 ? round((($counts['present'] + $counts['late']) / $totalMarked) * 100, 1) : 0;
+
+    $enrWhere = '';
+    $enrParams = [];
+    if ($classId !== '') {
+        $enrWhere = ' AND class_id = :class_id';
+        $enrParams['class_id'] = $classId;
+    } elseif ($schoolId !== '') {
+        $enrWhere = ' AND school_id = :school_id';
+        $enrParams['school_id'] = $schoolId;
+    }
+    $enrStmt = $pdo->prepare("SELECT COUNT(*) FROM enrollments WHERE enrollment_status = 'active' {$enrWhere}");
+    $enrStmt->execute($enrParams);
+    $totalEnrolled = (int)$enrStmt->fetchColumn();
+
+    $genderStmt = $pdo->prepare(
+        "SELECT c.gender, a.attendance_status, COUNT(*) as count
+         FROM attendance a
+         INNER JOIN children c ON c.id = a.child_id
+         WHERE a.date = :date {$whereClass}
+         GROUP BY c.gender, a.attendance_status"
+    );
+    $genderStmt->execute($params);
+    $genderStats = [
+        'male' => ['present' => 0, 'absent' => 0, 'rate' => 100],
+        'female' => ['present' => 0, 'absent' => 0, 'rate' => 100]
+    ];
+    foreach ($genderStmt->fetchAll() as $row) {
+        $g = strtolower($row['gender'] ?? 'male');
+        if (isset($genderStats[$g])) {
+            if ($row['attendance_status'] === 'present' || $row['attendance_status'] === 'late') {
+                $genderStats[$g]['present'] += (int)$row['count'];
+            } else {
+                $genderStats[$g]['absent'] += (int)$row['count'];
+            }
+        }
+    }
+    foreach (['male', 'female'] as $g) {
+        $t = $genderStats[$g]['present'] + $genderStats[$g]['absent'];
+        $genderStats[$g]['rate'] = $t > 0 ? round(($genderStats[$g]['present'] / $t) * 100, 1) : 100.0;
+    }
+
+    $fourteenDaysAgo = date('Y-m-d', strtotime('-14 days'));
+    $chronicParams = ['since' => $fourteenDaysAgo];
+    $chronicWhere = '';
+    if ($classId !== '') {
+        $chronicWhere = ' AND a.class_id = :class_id';
+        $chronicParams['class_id'] = $classId;
+    } elseif ($schoolId !== '') {
+        $chronicWhere = ' AND a.school_id = :school_id';
+        $chronicParams['school_id'] = $schoolId;
+    }
+
+    $chronicStmt = $pdo->prepare(
+        "SELECT c.id, c.child_unique_id, c.first_name, c.last_name, c.gender, c.guardian_phone,
+                sc.class_name, COUNT(CASE WHEN a.attendance_status = 'absent' THEN 1 END) as absent_count,
+                COUNT(a.id) as total_days
+         FROM attendance a
+         INNER JOIN children c ON c.id = a.child_id
+         LEFT JOIN school_classes sc ON sc.id = a.class_id
+         WHERE a.date >= :since {$chronicWhere}
+         GROUP BY c.id, c.child_unique_id, c.first_name, c.last_name, c.gender, c.guardian_phone, sc.class_name
+         HAVING absent_count >= 2
+         ORDER BY absent_count DESC
+         LIMIT 20"
+    );
+    $chronicStmt->execute($chronicParams);
+    $chronicStudents = $chronicStmt->fetchAll();
+
+    return [
+        'date' => $date,
+        'totalEnrolled' => $totalEnrolled,
+        'totalMarked' => $totalMarked,
+        'rate' => $rate,
+        'counts' => $counts,
+        'gender' => $genderStats,
+        'chronicWarnings' => $chronicStudents
+    ];
+  }
   private function enrollmentDocumentRecord(array $auth,string $id):array{$sql='SELECT e.*,c.child_unique_id,c.first_name,c.last_name,c.photo_url,c.guardian_phone,h.household_code,h.father_name,h.mother_name,h.phone_number AS household_phone,w.name AS ward_name,cm.name AS community_name,s.school_name,s.school_id AS school_registry_code,s.school_logo,sc.class_name,au.name AS approved_by_name,tu.name AS transitioned_by_name FROM enrollments e INNER JOIN schools s ON s.id=e.school_id INNER JOIN children c ON c.id=e.child_id LEFT JOIN school_classes sc ON sc.id=e.class_id LEFT JOIN households h ON h.id=c.household_id LEFT JOIN wards w ON w.id=COALESCE(h.ward_id,c.ward_id) LEFT JOIN communities cm ON cm.id=h.community_id LEFT JOIN users au ON au.id=e.approved_by LEFT JOIN users tu ON tu.id=e.transitioned_by WHERE e.id=:id';$stmt=$this->db->pdo()->prepare($sql);$stmt->execute(['id'=>$id]);$record=$stmt->fetch();if(!$record)throw new RuntimeException('Enrollment record not found.');$this->assertSchool($auth,$record['school_id']);return $record;}
   private function normaliseImageData(string $value,string $label='school logo'):?string{if($value==='')return null;if(str_starts_with($value,'http://')||str_starts_with($value,'https://'))return $value;if(!preg_match('#^data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$#',$value,$m))throw new RuntimeException('Use a PNG, JPEG, or WebP '.$label.'.');$binary=base64_decode(preg_replace('/\s+/','',$m[2]),true);if($binary===false||strlen($binary)>1500000||@getimagesizefromstring($binary)===false)throw new RuntimeException('Use a valid '.$label.' image no larger than 1.5 MB.');return'data:image/'.($m[1]==='jpg'?'jpeg':$m[1]).';base64,'.base64_encode($binary);}
   private function registeredTransferDestination(array $auth,string $id):array{$stmt=$this->db->pdo()->prepare('SELECT d.id,d.school_name FROM schools d INNER JOIN wards w ON w.id=d.ward_id WHERE d.id=:id AND d.is_active=1 AND w.lga_id=(SELECT w2.lga_id FROM schools s2 INNER JOIN wards w2 ON w2.id=s2.ward_id WHERE s2.id=:source)');$stmt->execute(['id'=>$id,'source'=>$auth['assigned_scope_id']]);return$stmt->fetch()?:throw new RuntimeException('The selected receiving school is not an active registered transfer destination in your LGA.');}
