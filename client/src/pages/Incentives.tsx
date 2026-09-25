@@ -30,7 +30,20 @@ import {
   DollarSign
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../lib/api';
+import { apiClient } from "@/api/client";
+
+const api = {
+  get: async <T,>(url: string) => {
+    const res = await apiClient.request<T>(url, { method: "GET" });
+    if (!res.success) throw new Error(res.error);
+    return { data: res.data };
+  },
+  post: async <T,>(url: string, body?: unknown) => {
+    const res = await apiClient.request<T>(url, { method: "POST", body });
+    if (!res.success) throw new Error(res.error);
+    return { data: res.data };
+  },
+};
 import { PrintableVoucherModal, VoucherManifestData } from '../components/incentives/PrintableVoucherModal';
 import { DonorLedgerModal, IncentiveRecord } from '../components/governance/DonorLedgerModal';
 
