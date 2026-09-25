@@ -234,6 +234,10 @@ try {
     $router->add('GET', '/api/v1/guardian/certificate-alerts', static fn(Request $request) => $educationController->guardianCertificateAlerts($request));
     $router->add('POST', '/api/v1/guardian/certificate-alerts/:id/read', static fn(Request $request, array $params) => $educationController->readGuardianCertificateAlert($request, $params));
     $router->add('POST', '/api/v1/incentives/compute', static fn(Request $request) => $programController->incentives($request));
+    $router->add('GET', '/api/v1/incentives/summary', static fn(Request $request) => $programController->incentivesSummary($request));
+    $router->add('POST', '/api/v1/incentives/batch-approve', static fn(Request $request) => $programController->batchApproveIncentives($request));
+    $router->add('POST', '/api/v1/incentives/batch-disburse', static fn(Request $request) => $programController->batchDisburseIncentives($request));
+    $router->add('GET', '/api/v1/incentives/voucher-manifest', static fn(Request $request) => $programController->voucherManifest($request));
     $router->add('GET', '/api/v1/incentives', static fn(Request $request) => $programController->incentiveList($request));
     $router->add('POST', '/api/v1/incentives/:id/approve', static fn(Request $request, array $params) => $programController->incentiveApprove($request, $params));
     $router->add('POST', '/api/v1/incentives/:id/disburse', static fn(Request $request, array $params) => $programController->incentiveDisburse($request, $params));

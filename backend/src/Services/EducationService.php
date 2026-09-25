@@ -34,7 +34,29 @@ final class EducationService {
   public function outputEnrollmentDocument(array $auth,string $id,string $type):never{$record=$this->enrollmentDocumentRecord($auth,$id);if($type==='transfer'&&$record['enrollment_status']!=='transferred')throw new RuntimeException('A transfer certificate is available only after a recorded transfer.');if($type==='withdrawal'&&$record['enrollment_status']!=='withdrawn')throw new RuntimeException('A withdrawal certificate is available only after a recorded withdrawal.');$signature=$type==='enrollment'?($record['approved_signature_data']??null):($record['transition_signature_data']??null);if($signature){$this->renderSignedEnrollmentPdf($record,$type,(string)$signature);}$this->renderEnrollmentPdf($record,$type);}
   public function attendance(array $auth, array $query): array {
     $from = 'attendance a INNER JOIN schools s ON s.id=a.school_id INNER JOIN children c ON c.id=a.child_id LEFT JOIN school_classes sc ON sc.id=a.class_id LEFT JOIN users u ON u.id=a.recorded_by';
-    [$scope, $params] = $this->scopeForEducation($auth, 's.ward_id', 's.id', 'a.class_id');
+    $params = [];
+    $scope = '';
+
+    if (($auth['role'] ?? '') === 'mobilizer') {
+      $stmt = $this->db->pdo()->prepare('SELECT community_id FROM user_community_assignments WHERE user_id = :uid');
+      $stmt->execute(['uid' => $auth['id']]);
+      $commIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+      if (!empty($commIds)) {
+        $inPlaceholders = [];
+        foreach ($commIds as $idx => $cid) {
+          $pName = 'mob_comm_' . $idx;
+          $inPlaceholders[] = ':' . $pName;
+          $params[$pName] = $cid;
+        }
+        $inList = implode(',', $inPlaceholders);
+        $scope = " AND (s.community_id IN ({$inList}) OR EXISTS (SELECT 1 FROM households h_mob WHERE h_mob.id = c.household_id AND h_mob.community_id IN ({$inList})))";
+      } else {
+        [$scope, $params] = ScopeFilter::byWard($auth, 's.ward_id');
+      }
+    } else {
+      [$scope, $params] = $this->scopeForEducation($auth, 's.ward_id', 's.id', 'a.class_id');
+    }
+
     $where = ' WHERE 1=1' . $scope;
 
     if (!empty($query['date'])) {
@@ -78,7 +100,13 @@ final class EducationService {
   }
 
   public function recordAttendance(array $auth,array $data):array{
+    if (!in_array($auth['role'] ?? '', ['headmaster', 'teacher'], true)) {
+      throw new RuntimeException('Only teachers and headmasters are permitted to record student attendance.');
+    }
     foreach(['childId','schoolId','date']as$key){if(empty($data[$key]))throw new RuntimeException("{$key} is required.");}
+    if ($auth['role'] === 'headmaster' && (($auth['assigned_scope_type'] ?? '') !== 'school' || ($auth['assigned_scope_id'] ?? '') !== $data['schoolId'])) {
+      throw new RuntimeException('Headmasters can only record attendance for their assigned school.');
+    }
     $this->assertSchool($auth,$data['schoolId']);
     if(!empty($data['classId']))$this->assertClassForSchool($auth,$data['classId'],$data['schoolId']);
     if(($auth['assigned_scope_type']??null)==='class'&&empty($data['classId']))throw new RuntimeException('A class is required for class-scoped attendance.');
@@ -105,12 +133,18 @@ final class EducationService {
   }
 
   public function batchRecordAttendance(array $auth, array $data): array {
+    if (!in_array($auth['role'] ?? '', ['headmaster', 'teacher'], true)) {
+        throw new RuntimeException('Only teachers and headmasters are permitted to record student attendance.');
+    }
     $schoolId = (string)($data['schoolId'] ?? '');
     $classId = (string)($data['classId'] ?? '');
     $date = (string)($data['date'] ?? date('Y-m-d'));
     $records = (array)($data['records'] ?? []);
     if (!$schoolId || !$date) {
         throw new RuntimeException('School ID and Date are required.');
+    }
+    if ($auth['role'] === 'headmaster' && (($auth['assigned_scope_type'] ?? '') !== 'school' || ($auth['assigned_scope_id'] ?? '') !== $schoolId)) {
+        throw new RuntimeException('Headmasters can only record attendance for their assigned school.');
     }
     $this->assertSchool($auth, $schoolId);
     if ($classId !== '') {
@@ -177,6 +211,9 @@ final class EducationService {
   }
 
   public function scanAttendance(array $auth, array $data): array {
+    if (!in_array($auth['role'] ?? '', ['headmaster', 'teacher'], true)) {
+      throw new RuntimeException('Only teachers and headmasters are permitted to scan attendance.');
+    }
     $raw = trim((string)($data['qrToken'] ?? $data['token'] ?? ''));
     if (str_starts_with($raw, 'AM2050:')) {
       $token = substr($raw, 7);
@@ -217,6 +254,12 @@ final class EducationService {
     $enrollment = $placement->fetch();
     if (!$enrollment) {
       throw new RuntimeException("Child {$child['first_name']} {$child['last_name']} has no active school enrollment.");
+    }
+
+    if (($auth['role'] ?? '') === 'headmaster' && (($auth['assigned_scope_type'] ?? '') === 'school')) {
+      if ((string)$enrollment['school_id'] !== (string)$auth['assigned_scope_id']) {
+        throw new RuntimeException('Headmasters can only scan attendance for students enrolled in their assigned school.');
+      }
     }
 
     if (!empty($data['schoolId']) && (string)$data['schoolId'] !== $enrollment['school_id']) {
@@ -438,36 +481,28 @@ final class EducationService {
 
     $whereClass = '';
     $params = ['date' => $date];
+    $enrWhere = '';
+    $enrParams = [];
+
     if ($classId !== '') {
         $whereClass = ' AND a.class_id = :class_id';
         $params['class_id'] = $classId;
-    } elseif ($schoolId !== '') {
-        $whereClass = ' AND a.school_id = :school_id';
-        $params['school_id'] = $schoolId;
-    }
-
-    $stmt = $pdo->prepare(
-        "SELECT a.attendance_status, COUNT(*) as count
-         FROM attendance a
-         WHERE a.date = :date {$whereClass}
-         GROUP BY a.attendance_status"
-    );
-    $stmt->execute($params);
-    $counts = ['present' => 0, 'late' => 0, 'absent' => 0, 'excused' => 0];
-    foreach ($stmt->fetchAll() as $row) {
-        $counts[$row['attendance_status']] = (int)$row['count'];
-    }
-    $totalMarked = array_sum($counts);
-    $rate = $totalMarked > 0 ? round((($counts['present'] + $counts['late']) / $totalMarked) * 100, 1) : 0;
-
-    $enrWhere = '';
-    $enrParams = [];
-    if ($classId !== '') {
         $enrWhere = ' AND class_id = :class_id';
         $enrParams['class_id'] = $classId;
     } elseif ($schoolId !== '') {
+        $whereClass = ' AND a.school_id = :school_id';
+        $params['school_id'] = $schoolId;
         $enrWhere = ' AND school_id = :school_id';
         $enrParams['school_id'] = $schoolId;
+    } elseif (($auth['role'] ?? '') === 'mobilizer') {
+        $commStmt = $pdo->prepare('SELECT community_id FROM user_community_assignments WHERE user_id = :uid');
+        $commStmt->execute(['uid' => $auth['id']]);
+        $commIds = $commStmt->fetchAll(PDO::FETCH_COLUMN);
+        if (!empty($commIds)) {
+            $inList = "'" . implode("','", array_map(fn($v) => addslashes((string)$v), $commIds)) . "'";
+            $whereClass = " AND (a.school_id IN (SELECT id FROM schools WHERE community_id IN ({$inList})) OR EXISTS (SELECT 1 FROM children c_sub INNER JOIN households h_sub ON h_sub.id = c_sub.household_id WHERE c_sub.id = a.child_id AND h_sub.community_id IN ({$inList})))";
+            $enrWhere = " AND (school_id IN (SELECT id FROM schools WHERE community_id IN ({$inList})) OR child_id IN (SELECT c_sub.id FROM children c_sub INNER JOIN households h_sub ON h_sub.id = c_sub.household_id WHERE h_sub.community_id IN ({$inList})))";
+        }
     }
     $enrStmt = $pdo->prepare("SELECT COUNT(*) FROM enrollments WHERE enrollment_status = 'active' {$enrWhere}");
     $enrStmt->execute($enrParams);

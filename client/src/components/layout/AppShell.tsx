@@ -46,9 +46,6 @@ export function AppShell({ children, user, pendingSync, onLogout, onQueueChange 
         </button>
       </div>
       <nav aria-label="Main navigation" className="flex-1 overflow-y-auto border-y border-white/10 px-3 py-4">
-        <p className="px-2 pb-2 font-mono text-[0.59rem] font-medium uppercase tracking-[0.14em] text-[#9cc8ae]">
-          Navigation
-        </p>
         <div className="space-y-1">
           {accessibleModules.map((module) => {
             const active =

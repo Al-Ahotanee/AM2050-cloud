@@ -30,7 +30,7 @@ export function WordmarkLogo({
   className = "",
   badgeTheme = "emerald",
   showDot = true,
-  subtitleText = "AREWA MISSION",
+  subtitleText = "AREWA MISSION 2050",
   showTagline = false,
   taglineText = "ZERO OUT-OF-SCHOOL CHILDREN IN AREWA BY 2050",
 }: WordmarkLogoProps) {

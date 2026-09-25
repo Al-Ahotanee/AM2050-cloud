@@ -8,15 +8,15 @@ use AM2050\Middleware\RoleMiddleware;
 use AM2050\Services\UserService;
 final class UserController {
     public function __construct(private readonly AuthMiddleware $auth, private readonly UserService $service) {}
-    private function superAdmin(Request $request): array { $actor=$this->auth->require($request); RoleMiddleware::require($actor,'super_admin'); return $actor; }
+    private function adminUser(Request $request): array { $actor=$this->auth->require($request); RoleMiddleware::allow($actor,['super_admin','program_admin']); return $actor; }
     private function headmaster(Request $request): array { $actor=$this->auth->require($request); RoleMiddleware::allow($actor,['headmaster']); return $actor; }
     private function schoolManager(Request $request): array { $actor=$this->auth->require($request); RoleMiddleware::allow($actor,['super_admin','program_admin','lga_supervisor','ward_supervisor','headmaster']); return $actor; }
-    public function list(Request $request): never { $this->superAdmin($request); $result=$this->service->list($request->query); Response::paginate($result['data'],$result['page'],$result['limit'],$result['total']); }
-    public function create(Request $request): never { Response::success($this->service->create($this->superAdmin($request),$request->body()),201); }
-    public function get(Request $request,array $params): never { $this->superAdmin($request); Response::success($this->service->get($params['id'])); }
-    public function update(Request $request,array $params): never { Response::success($this->service->update($this->superAdmin($request),$params['id'],$request->body())); }
+    public function list(Request $request): never { $this->adminUser($request); $result=$this->service->list($request->query); Response::paginate($result['data'],$result['page'],$result['limit'],$result['total']); }
+    public function create(Request $request): never { Response::success($this->service->create($this->adminUser($request),$request->body()),201); }
+    public function get(Request $request,array $params): never { $this->adminUser($request); Response::success($this->service->get($params['id'])); }
+    public function update(Request $request,array $params): never { Response::success($this->service->update($this->adminUser($request),$params['id'],$request->body())); }
     public function submitTeacherRequest(Request $request): never { Response::success($this->service->submitTeacherRequest($this->headmaster($request),$request->body()),201); }
-    public function teacherRequests(Request $request): never { $this->superAdmin($request); Response::success($this->service->teacherRequests()); }
+    public function teacherRequests(Request $request): never { $this->adminUser($request); Response::success($this->service->teacherRequests()); }
     public function schoolTeachers(Request $request): never { Response::success($this->service->schoolTeachers($this->schoolManager($request))); }
-    public function approveTeacherRequest(Request $request,array $params): never { Response::success($this->service->approveTeacherRequest($this->superAdmin($request),$params['id'],$request->body())); }
+    public function approveTeacherRequest(Request $request,array $params): never { Response::success($this->service->approveTeacherRequest($this->adminUser($request),$params['id'],$request->body())); }
 }

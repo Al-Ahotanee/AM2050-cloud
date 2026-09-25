@@ -43,10 +43,11 @@ final class EducationController {
     public function downloadWithdrawalCertificate(Request $request,array $params): never { $actor=$this->educationViewer($request); $this->service->outputEnrollmentDocument($actor,$params['id'],'withdrawal'); }
     public function guardianCertificateAlerts(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['guardian']); Response::success($this->service->guardianCertificateAlerts($actor)); }
     public function readGuardianCertificateAlert(Request $request,array $params): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['guardian']); Response::success($this->service->readGuardianCertificateAlert($actor,$params['id'])); }
-    public function attendance(Request $request): never { $this->paginated($request,fn()=>$this->service->attendance($this->educationViewer($request),$request->query)); }
-    public function recordAttendance(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster','teacher','super_admin','program_admin']); Response::success($this->service->recordAttendance($actor,$request->body()),201); }
-    public function batchRecordAttendance(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster','teacher','super_admin','program_admin']); Response::success($this->service->batchRecordAttendance($actor,$request->body()),201); }
-    public function scanAttendance(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster','teacher','super_admin','program_admin']); Response::success($this->service->scanAttendance($actor,$request->body()),201); }
-    public function attendanceMatrix(Request $request): never { $actor=$this->educationViewer($request); Response::success($this->service->attendanceMatrix($actor,$request->query)); }
-    public function attendanceStats(Request $request): never { $actor=$this->educationViewer($request); Response::success($this->service->attendanceStats($actor,$request->query)); }
+    private function attendanceViewer(Request $request): array { $actor=$this->actor($request); RoleMiddleware::allow($actor,['super_admin','program_admin','lga_supervisor','ward_supervisor','headmaster','teacher','mobilizer']); return $actor; }
+    public function attendance(Request $request): never { $this->paginated($request,fn()=>$this->service->attendance($this->attendanceViewer($request),$request->query)); }
+    public function recordAttendance(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster','teacher']); Response::success($this->service->recordAttendance($actor,$request->body()),201); }
+    public function batchRecordAttendance(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster','teacher']); Response::success($this->service->batchRecordAttendance($actor,$request->body()),201); }
+    public function scanAttendance(Request $request): never { $actor=$this->actor($request); RoleMiddleware::allow($actor,['headmaster','teacher']); Response::success($this->service->scanAttendance($actor,$request->body()),201); }
+    public function attendanceMatrix(Request $request): never { $actor=$this->attendanceViewer($request); Response::success($this->service->attendanceMatrix($actor,$request->query)); }
+    public function attendanceStats(Request $request): never { $actor=$this->attendanceViewer($request); Response::success($this->service->attendanceStats($actor,$request->query)); }
 }

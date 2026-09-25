@@ -23,6 +23,7 @@ import ResultManagement from "@/pages/ResultManagement";
 import Defaulters from "@/pages/Defaulters";
 import FieldOperations from "@/pages/FieldOperations";
 import ProgrammeControl from "@/pages/ProgrammeControl";
+import Incentives from "@/pages/Incentives";
 import SchoolOperations from "@/pages/SchoolOperations";
 import SchoolRegistry from "@/pages/SchoolRegistry";
 import UserAdministration from "@/pages/UserAdministration";
@@ -54,7 +55,7 @@ function Router({ role, pendingSync, onQueueChange }: { role: Role; pendingSync:
     <Route path="/surveys" component={() => guard("surveys", <FieldOperations mode="surveys" />)} />
     <Route path="/tsangaya" component={() => guard("tsangaya", <FieldOperations mode="tsangaya" />)} />
     <Route path="/compliance" component={() => guard("compliance", <ProgrammeControl mode="compliance" role={role} />)} />
-    <Route path="/incentives" component={() => guard("incentives", <ProgrammeControl mode="incentives" role={role} />)} />
+    <Route path="/incentives" component={() => guard("incentives", <Incentives role={role} />)} />
     <Route path="/users" component={() => guard("users", <UserAdministration />)} />
     <Route path="/teacher-management" component={() => guard("teacher-management", <TeacherManagement />)} />
     <Route path="/geography" component={() => guard("geography", <Geography />)} />

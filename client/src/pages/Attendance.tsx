@@ -159,10 +159,14 @@ const formatDisplayDate = (dStr: string) => {
 
 export default function Attendance({ role }: { role: Role }) {
   const { user } = useAuth();
-  const isHeadmaster = role === "headmaster" || role === "super_admin" || role === "program_admin";
+  const isHeadmaster = role === "headmaster";
+  const canRecord = role === "headmaster" || role === "teacher";
+  const isMobilizer = role === "mobilizer";
 
-  // Tab State
-  const [activeTab, setActiveTab] = useState<"rollcall" | "register" | "analytics" | "audit">("rollcall");
+  // Tab State: default recording roles to rollcall, inspection/mobilizer roles to register matrix
+  const [activeTab, setActiveTab] = useState<"rollcall" | "register" | "analytics" | "audit">(
+    canRecord ? "rollcall" : "register"
+  );
 
   // Global Context & Filter State
   const [schools, setSchools] = useState<School[]>([]);
@@ -906,25 +910,44 @@ export default function Attendance({ role }: { role: Role }) {
               </div>
             </div>
 
-            {/* Central QR Attendance Workstation */}
-            <div className="rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-white via-emerald-50/20 to-slate-50 p-6 shadow-md">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-emerald-200/60 pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="flex size-7 items-center justify-center rounded-lg bg-emerald-700 text-white shadow-sm">
-                      <Zap size={16} />
-                    </span>
-                    <h2 className="font-display text-lg font-bold text-[#123148]">
-                      AM2050 Verified QR Attendance Scanner
-                    </h2>
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-800 border border-emerald-300">
-                      LIVE ROLL-CALL
-                    </span>
+            {/* Central QR Attendance Workstation (Recording roles only) or Oversight Banner */}
+            {!canRecord ? (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-6 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-10 items-center justify-center rounded-xl bg-sky-600 text-white shrink-0 shadow-sm">
+                    <ShieldCheck size={20} />
                   </div>
-                  <p className="mt-1 text-xs text-slate-600">
-                    Scan student QR badges via camera or upload badge photos. Physical presence is strictly verified by student QR credential.
-                  </p>
+                  <div>
+                    <h2 className="font-display text-base font-bold text-sky-950">
+                      {isMobilizer ? "Mobilizer Community Attendance Verification Hub" : "Attendance Read-Only Oversight View"}
+                    </h2>
+                    <p className="mt-1 text-xs text-sky-800 leading-relaxed">
+                      {isMobilizer
+                        ? "As an authorized Community Mobilizer, you have real-time visibility into the verified daily attendance of enrolled learners residing in your assigned communities. Physical roll-call scanning is strictly reserved for the classroom Teacher and Headmaster."
+                        : "Physical daily attendance roll-call is strictly recorded and signed off by the assigned Class Teacher and Headmaster via QR code verification. You have full read-only visibility into registers, analytics, and audit logs."}
+                    </p>
+                  </div>
                 </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border-2 border-emerald-500/30 bg-gradient-to-br from-white via-emerald-50/20 to-slate-50 p-6 shadow-md">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-emerald-200/60 pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-7 items-center justify-center rounded-lg bg-emerald-700 text-white shadow-sm">
+                        <Zap size={16} />
+                      </span>
+                      <h2 className="font-display text-lg font-bold text-[#123148]">
+                        AM2050 Verified QR Attendance Scanner
+                      </h2>
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-800 border border-emerald-300">
+                        LIVE ROLL-CALL
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Scan student QR badges via camera or upload badge photos. Physical presence is strictly verified by student QR credential.
+                    </p>
+                  </div>
 
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 px-3 py-1.5 shadow-sm">
@@ -1070,6 +1093,7 @@ export default function Attendance({ role }: { role: Role }) {
                 </div>
               </div>
             </div>
+            )}
 
             {/* Daily Roll-Call Verification Table */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
@@ -1219,12 +1243,16 @@ export default function Attendance({ role }: { role: Role }) {
                               )}
                             </td>
                             <td className="py-3 px-4 text-right">
-                              <button
-                                onClick={() => handleOpenExcuseModal(stu)}
-                                className="action-press inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
-                              >
-                                {isExcused ? "Edit Excuse" : "Log Excuse Note"}
-                              </button>
+                              {canRecord ? (
+                                <button
+                                  onClick={() => handleOpenExcuseModal(stu)}
+                                  className="action-press inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 shadow-sm"
+                                >
+                                  {isExcused ? "Edit Excuse" : "Log Excuse Note"}
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 italic">Verified Record</span>
+                              )}
                             </td>
                           </tr>
                         );

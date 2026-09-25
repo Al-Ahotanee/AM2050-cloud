@@ -162,6 +162,9 @@ final class ProgramService
 
     public function publishResults(array $auth, array $data): array
     {
+        if (($auth['role'] ?? '') !== 'headmaster') {
+            throw new RuntimeException('Only the Headmaster is authorized to officially publish term examination results.');
+        }
         foreach (["classId", "termId"] as $key) {
             if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
         }
@@ -170,6 +173,15 @@ final class ProgramService
         $subject = !empty($data["subject"]) ? trim((string)$data["subject"]) : null;
         $note = !empty($data["note"]) ? trim((string)$data["note"]) : "Officially published by Headmaster";
         $pdo = $this->db->pdo();
+
+        $classSchoolStmt = $pdo->prepare("SELECT school_id FROM school_classes WHERE id=:class");
+        $classSchoolStmt->execute(["class" => $classId]);
+        $schoolId = $classSchoolStmt->fetchColumn();
+        if (!$schoolId) throw new RuntimeException("Class not found.");
+        if (($auth['assigned_scope_type'] ?? null) === 'school' && ($auth['assigned_scope_id'] ?? null) !== $schoolId) {
+            throw new RuntimeException("Headmasters can only publish results for classes within their designated school.");
+        }
+
         $sql = "UPDATE student_results r INNER JOIN enrollments e ON e.id=r.enrollment_id SET r.status='published', r.published_by=:user, r.published_at=NOW(), r.published_note=:note WHERE e.class_id=:class AND r.term_id=:term AND r.status IN ('draft', 'submitted')";
         $params = ["user" => $auth["id"], "note" => $note, "class" => $classId, "term" => $termId];
         if ($subject) {
@@ -185,6 +197,9 @@ final class ProgramService
 
     public function unpublishResults(array $auth, array $data): array
     {
+        if (($auth['role'] ?? '') !== 'headmaster') {
+            throw new RuntimeException('Only the Headmaster is authorized to unpublish examination results.');
+        }
         foreach (["classId", "termId"] as $key) {
             if (empty($data[$key])) throw new RuntimeException("{$key} is required.");
         }
@@ -193,6 +208,15 @@ final class ProgramService
         $subject = !empty($data["subject"]) ? trim((string)$data["subject"]) : null;
         $reason = !empty($data["reason"]) ? trim((string)$data["reason"]) : "Reopened for corrections";
         $pdo = $this->db->pdo();
+
+        $classSchoolStmt = $pdo->prepare("SELECT school_id FROM school_classes WHERE id=:class");
+        $classSchoolStmt->execute(["class" => $classId]);
+        $schoolId = $classSchoolStmt->fetchColumn();
+        if (!$schoolId) throw new RuntimeException("Class not found.");
+        if (($auth['assigned_scope_type'] ?? null) === 'school' && ($auth['assigned_scope_id'] ?? null) !== $schoolId) {
+            throw new RuntimeException("Headmasters can only unpublish results for classes within their designated school.");
+        }
+
         $sql = "UPDATE student_results r INNER JOIN enrollments e ON e.id=r.enrollment_id SET r.status='draft', r.published_at=NULL, r.published_by=NULL WHERE e.class_id=:class AND r.term_id=:term AND r.status='published'";
         $params = ["class" => $classId, "term" => $termId];
         if ($subject) {
@@ -484,12 +508,352 @@ final class ProgramService
     public function cohortProgress(array $auth,string $id):array{$this->cohortOwned($auth,$id);$stmt=$this->db->pdo()->prepare("SELECT c.*,COUNT(DISTINCT cm.child_id) AS member_count,COUNT(DISTINCT CASE WHEN e.enrollment_status='active' THEN cm.child_id END) AS active_enrollment,ROUND(AVG(CASE WHEN a.date>=DATE_SUB(CURDATE(),INTERVAL 30 DAY) THEN a.attendance_status IN ('present','late') END)*100,2) AS attendance_rate,ROUND(AVG(r.score),2) AS average_score FROM cohorts c LEFT JOIN cohort_members cm ON cm.cohort_id=c.id AND cm.removed_at IS NULL LEFT JOIN enrollments e ON e.child_id=cm.child_id AND e.enrollment_status='active' LEFT JOIN attendance a ON a.child_id=cm.child_id LEFT JOIN student_results r ON r.enrollment_id=e.id WHERE c.id=:id GROUP BY c.id");$stmt->execute(['id'=>$id]);return$stmt->fetch()?:throw new RuntimeException('Cohort not found.');}
     public function guardianChildren(array $auth):array{$phone=(string)($auth['phone']??'');if($phone==='')throw new RuntimeException('Guardian phone identity is unavailable.');$stmt=$this->db->pdo()->prepare("SELECT c.id,c.child_unique_id,c.first_name,c.last_name,c.date_of_birth,c.gender,c.child_status,e.id AS enrollment_id,e.enrollment_status,s.school_name,sc.class_name FROM children c LEFT JOIN enrollments e ON e.child_id=c.id AND e.enrollment_status='active' LEFT JOIN schools s ON s.id=e.school_id LEFT JOIN school_classes sc ON sc.id=e.class_id WHERE c.guardian_phone=:phone ORDER BY c.first_name,c.last_name");$stmt->execute(['phone'=>$phone]);$children=$stmt->fetchAll();foreach($children as&$child){$attendance=$this->db->pdo()->prepare('SELECT date,attendance_status FROM attendance WHERE child_id=:id ORDER BY date DESC LIMIT 30');$attendance->execute(['id'=>$child['id']]);$child['attendance']=$attendance->fetchAll();$results=$this->db->pdo()->prepare('SELECT r.subject,r.score,r.grade,t.term_name,t.academic_year FROM student_results r INNER JOIN enrollments e ON e.id=r.enrollment_id INNER JOIN terms t ON t.id=r.term_id WHERE e.child_id=:id ORDER BY r.created_at DESC');$results->execute(['id'=>$child['id']]);$child['results']=$results->fetchAll();$incentives=$this->db->pdo()->prepare('SELECT month,attendance_rate,eligibility_status,payment_status,disbursement_date FROM incentives WHERE child_id=:id ORDER BY month DESC');$incentives->execute(['id'=>$child['id']]);$child['incentives']=$incentives->fetchAll();}return$children;}
 
-    public function incentiveCompute(array $auth,array $data):array { if(empty($data['month'])) throw new RuntimeException('month is required.'); $rawThresh=$this->db->pdo()->query("SELECT rule_value FROM program_rules WHERE rule_key='incentiveAttendanceThreshold'")->fetchColumn(); $threshold=$rawThresh!==false&&$rawThresh!==null?(float)json_decode((string)$rawThresh,true):80.0; $stmt=$this->db->pdo()->prepare("SELECT c.id,COALESCE(AVG(at.attendance_status IN ('present','late'))*100,0) rate FROM children c LEFT JOIN attendance at ON at.child_id=c.id AND DATE_FORMAT(at.date,'%Y-%m-01')=:month GROUP BY c.id"); $stmt->execute(['month'=>$data['month']]); $insert=$this->db->pdo()->prepare('INSERT INTO incentives(id,child_id,month,attendance_rate,eligibility_status) VALUES(:id,:child,:month,:rate,:eligibility) ON DUPLICATE KEY UPDATE attendance_rate=VALUES(attendance_rate),eligibility_status=VALUES(eligibility_status)'); $count=0; foreach($stmt->fetchAll() as $row){$insert->execute(['id'=>Ulids::make(),'child'=>$row['id'],'month'=>$data['month'],'rate'=>$row['rate'],'eligibility'=>(float)$row['rate']>=$threshold?'eligible':'ineligible']);$count++;}$this->audit->record($auth['id'],'COMPUTE','incentive',$data['month'],null,['records'=>$count]);return['computed'=>$count,'threshold'=>$threshold]; }
+    public function incentiveCompute(array $auth, array $data): array
+    {
+        if (empty($data['month'])) throw new RuntimeException('month is required.');
+        $month = (string)$data['month'];
+        $incentiveType = (string)($data['incentiveType'] ?? 'cct');
+        $rawThresh = $this->db->pdo()->query("SELECT rule_value FROM program_rules WHERE rule_key='incentiveAttendanceThreshold'")->fetchColumn();
+        $defaultThreshold = $rawThresh !== false && $rawThresh !== null ? (float)json_decode((string)$rawThresh, true) : 80.0;
+        $threshold = isset($data['threshold']) && is_numeric($data['threshold']) ? (float)$data['threshold'] : $defaultThreshold;
 
-    public function listCompliance(array $auth,array $query):array { return $this->wardRegister($auth,'compliance_flags cf','cf.ward_id','cf.*',"CASE cf.status WHEN 'open' THEN 1 WHEN 'in_review' THEN 2 ELSE 3 END,cf.sla_due_date ASC",$query); }
-    public function createCompliance(array $auth,array $data):array { foreach(['flagType','entityType','entityId','wardId'] as $key)if(empty($data[$key]))throw new RuntimeException("{$key} is required.");$this->assertWard($auth,(string)$data['wardId']);$id=Ulids::make();$this->db->pdo()->prepare('INSERT INTO compliance_flags(id,flag_type,entity_type,entity_id,ward_id,status,sla_due_date) VALUES(:id,:type,:entity_type,:entity_id,:ward,:status,:due)')->execute(['id'=>$id,'type'=>$data['flagType'],'entity_type'=>$data['entityType'],'entity_id'=>$data['entityId'],'ward'=>$data['wardId'],'status'=>$data['status']??'open','due'=>$data['slaDueDate']??null]);$record=$this->one('compliance_flags',$id);$this->audit->record($auth['id'],'CREATE','compliance_flag',$id,null,$record);return$record; }
-    public function updateCompliance(array $auth,string $id,array $data):array { $before=$this->one('compliance_flags',$id);$this->assertWard($auth,(string)$before['ward_id']);$allowed=['status','slaDueDate'];$sets=[];$params=['id'=>$id];if(array_key_exists('status',$data)){$sets[]='status=:status';$params['status']=$data['status'];}if(array_key_exists('slaDueDate',$data)){$sets[]='sla_due_date=:slaDueDate';$params['slaDueDate']=$data['slaDueDate'];}if($sets===[])throw new RuntimeException('No supported compliance fields were supplied.');$this->db->pdo()->prepare('UPDATE compliance_flags SET '.implode(',',$sets).' WHERE id=:id')->execute($params);$after=$this->one('compliance_flags',$id);$this->audit->record($auth['id'],'UPDATE','compliance_flag',$id,$before,$after);return$after; }
-    public function listIncentives(array $auth,array $query):array { $from='incentives i INNER JOIN children c ON c.id=i.child_id LEFT JOIN households h ON h.id=c.household_id';return $this->wardRegister($auth,$from,'COALESCE(h.ward_id,c.ward_id)',"i.*,c.child_unique_id,c.first_name,c.last_name,(SELECT rule_value FROM program_rules WHERE rule_key='incentiveAmount' LIMIT 1) AS configured_amount",'i.month DESC,i.created_at DESC',$query); }
+        $rawAmount = $this->db->pdo()->query("SELECT rule_value FROM program_rules WHERE rule_key='incentiveAmount'")->fetchColumn();
+        $defaultAmount = $rawAmount !== false && $rawAmount !== null ? (float)json_decode((string)$rawAmount, true) : 5000.00;
+        $amount = isset($data['amount']) && is_numeric($data['amount']) ? (float)$data['amount'] : $defaultAmount;
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT c.id AS child_id,
+                    COALESCE(h.ward_id, c.ward_id) AS ward_id,
+                    h.community_id,
+                    COALESCE(h.primary_contact_name, CONCAT(COALESCE(h.father_name, ''), ' / ', COALESCE(h.mother_name, ''))) AS recipient_name,
+                    COALESCE(h.phone_number, c.guardian_phone) AS recipient_phone,
+                    COALESCE(AVG(at.attendance_status IN ('present','late')) * 100, 0) AS rate
+             FROM children c
+             LEFT JOIN households h ON h.id = c.household_id
+             LEFT JOIN attendance at ON at.child_id = c.id AND DATE_FORMAT(at.date, '%Y-%m-01') = :month
+             GROUP BY c.id, h.ward_id, c.ward_id, h.community_id, h.primary_contact_name, h.father_name, h.mother_name, h.phone_number, c.guardian_phone"
+        );
+        $stmt->execute(['month' => $month]);
+        $rows = $stmt->fetchAll();
+
+        $insert = $this->db->pdo()->prepare(
+            "INSERT INTO incentives (id, child_id, month, attendance_rate, eligibility_status, amount, recipient_name, recipient_phone, ward_id, community_id)
+             VALUES (:id, :child, :month, :rate, :eligibility, :amount, :recipient_name, :recipient_phone, :ward_id, :community_id)
+             ON DUPLICATE KEY UPDATE
+                attendance_rate = VALUES(attendance_rate),
+                eligibility_status = VALUES(eligibility_status),
+                amount = VALUES(amount),
+                recipient_name = VALUES(recipient_name),
+                recipient_phone = VALUES(recipient_phone),
+                ward_id = VALUES(ward_id),
+                community_id = VALUES(community_id)"
+        );
+
+        $count = 0;
+        $eligibleCount = 0;
+        foreach ($rows as $row) {
+            $rate = (float)$row['rate'];
+            $isEligible = $rate >= $threshold;
+            if ($isEligible) $eligibleCount++;
+            $recName = trim((string)($row['recipient_name'] ?? ''));
+            if ($recName === '/' || $recName === '') $recName = 'Registered Guardian';
+            $insert->execute([
+                'id' => Ulids::make(),
+                'child' => $row['child_id'],
+                'month' => $month,
+                'rate' => $rate,
+                'eligibility' => $isEligible ? 'eligible' : 'ineligible',
+                'amount' => $amount,
+                'recipient_name' => mb_substr($recName, 0, 150),
+                'recipient_phone' => $row['recipient_phone'] ? mb_substr((string)$row['recipient_phone'], 0, 50) : null,
+                'ward_id' => $row['ward_id'] ?: null,
+                'community_id' => $row['community_id'] ?: null,
+            ]);
+            $count++;
+        }
+
+        $this->audit->record($auth['id'], 'COMPUTE', 'incentive', $month, null, [
+            'records' => $count,
+            'eligible' => $eligibleCount,
+            'threshold' => $threshold,
+            'amount' => $amount,
+            'incentiveType' => $incentiveType
+        ]);
+
+        return [
+            'computed' => $count,
+            'eligible' => $eligibleCount,
+            'threshold' => $threshold,
+            'amount' => $amount,
+            'month' => $month
+        ];
+    }
+
+    public function incentivesSummary(array $auth, array $query): array
+    {
+        $pdo = $this->db->pdo();
+        $month = (string)($query['month'] ?? date('Y-m-01'));
+        $params = ['month' => $month];
+
+        $where = " WHERE i.month = :month";
+        if (!empty($query['ward_id'])) {
+            $where .= " AND i.ward_id = :ward";
+            $params['ward'] = $query['ward_id'];
+        }
+        if (!empty($query['community_id'])) {
+            $where .= " AND i.community_id = :comm";
+            $params['comm'] = $query['community_id'];
+        }
+
+        $kpiStmt = $pdo->prepare(
+            "SELECT
+                COUNT(i.id) AS total_evaluated,
+                COUNT(CASE WHEN i.eligibility_status = 'eligible' THEN 1 END) AS total_eligible,
+                COUNT(CASE WHEN i.eligibility_status = 'ineligible' THEN 1 END) AS total_ineligible,
+                COUNT(CASE WHEN i.payment_status = 'approved' THEN 1 END) AS total_approved,
+                COUNT(CASE WHEN i.payment_status = 'disbursed' THEN 1 END) AS total_disbursed,
+                COALESCE(SUM(CASE WHEN i.eligibility_status = 'eligible' THEN i.amount ELSE 0 END), 0) AS total_eligible_amount,
+                COALESCE(SUM(CASE WHEN i.payment_status = 'approved' THEN i.amount ELSE 0 END), 0) AS total_approved_amount,
+                COALESCE(SUM(CASE WHEN i.payment_status = 'disbursed' THEN i.amount ELSE 0 END), 0) AS total_disbursed_amount
+             FROM incentives i
+             {$where}"
+        );
+        $kpiStmt->execute($params);
+        $kpis = $kpiStmt->fetch() ?: [];
+
+        $methodStmt = $pdo->prepare(
+            "SELECT i.payment_method, COUNT(i.id) as count, COALESCE(SUM(i.amount), 0) as total_amount
+             FROM incentives i
+             {$where} AND i.eligibility_status = 'eligible'
+             GROUP BY i.payment_method"
+        );
+        $methodStmt->execute($params);
+        $byMethod = $methodStmt->fetchAll();
+
+        return [
+            'month' => $month,
+            'kpis' => [
+                'totalEvaluated' => (int)($kpis['total_evaluated'] ?? 0),
+                'totalEligible' => (int)($kpis['total_eligible'] ?? 0),
+                'totalIneligible' => (int)($kpis['total_ineligible'] ?? 0),
+                'totalApproved' => (int)($kpis['total_approved'] ?? 0),
+                'totalDisbursed' => (int)($kpis['total_disbursed'] ?? 0),
+                'totalEligibleAmount' => (float)($kpis['total_eligible_amount'] ?? 0),
+                'totalApprovedAmount' => (float)($kpis['total_approved_amount'] ?? 0),
+                'totalDisbursedAmount' => (float)($kpis['total_disbursed_amount'] ?? 0),
+            ],
+            'byMethod' => $byMethod
+        ];
+    }
+
+    public function batchApproveIncentives(array $auth, array $data): array
+    {
+        $pdo = $this->db->pdo();
+        $ids = (array)($data['ids'] ?? []);
+        $paymentStatus = in_array($data['paymentStatus'] ?? 'approved', ['approved', 'rejected'], true) ? $data['paymentStatus'] : 'approved';
+        if (empty($ids)) {
+            $month = (string)($data['month'] ?? '');
+            if (!$month) throw new RuntimeException('Either an array of incentive IDs or a month is required.');
+            $stmt = $pdo->prepare("UPDATE incentives SET payment_status = :status, approved_by = :user WHERE month = :month AND eligibility_status = 'eligible' AND payment_status = 'pending'");
+            $stmt->execute(['status' => $paymentStatus, 'user' => $auth['id'], 'month' => $month]);
+            $count = $stmt->rowCount();
+        } else {
+            $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $pdo->prepare("UPDATE incentives SET payment_status = ?, approved_by = ? WHERE id IN ({$inPlaceholders}) AND eligibility_status = 'eligible'");
+            $stmt->execute([$paymentStatus, $auth['id'], ...$ids]);
+            $count = $stmt->rowCount();
+        }
+        $this->audit->record($auth['id'], 'BATCH_APPROVE', 'incentive', (string)count($ids), null, ['approvedCount' => $count, 'status' => $paymentStatus]);
+        return ['count' => $count, 'paymentStatus' => $paymentStatus];
+    }
+
+    public function batchDisburseIncentives(array $auth, array $data): array
+    {
+        $pdo = $this->db->pdo();
+        $ids = (array)($data['ids'] ?? []);
+        if (empty($ids)) throw new RuntimeException('Incentive IDs are required for batch disbursement.');
+        $paymentMethod = (string)($data['paymentMethod'] ?? 'bank_transfer');
+        $batchReference = trim((string)($data['batchReference'] ?? 'BATCH-' . date('Ymd-His')));
+
+        $inPlaceholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare(
+            "UPDATE incentives 
+             SET payment_status = 'disbursed',
+                 disbursed_by = ?,
+                 disbursement_date = NOW(),
+                 disbursement_reference = ?,
+                 batch_reference = ?,
+                 payment_method = ?
+             WHERE id IN ({$inPlaceholders}) AND payment_status = 'approved'"
+        );
+        $stmt->execute([$auth['id'], $batchReference, $batchReference, $paymentMethod, ...$ids]);
+        $count = $stmt->rowCount();
+
+        $sumStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM incentives WHERE batch_reference = ?");
+        $sumStmt->execute([$batchReference]);
+        $totalAmount = (float)$sumStmt->fetchColumn();
+
+        $this->audit->record($auth['id'], 'BATCH_DISBURSE', 'incentive', $batchReference, null, [
+            'disbursedCount' => $count,
+            'totalAmount' => $totalAmount,
+            'paymentMethod' => $paymentMethod,
+            'batchReference' => $batchReference
+        ]);
+
+        return [
+            'disbursedCount' => $count,
+            'totalAmount' => $totalAmount,
+            'batchReference' => $batchReference,
+            'paymentMethod' => $paymentMethod
+        ];
+    }
+
+    public function voucherManifest(array $auth, array $query): array
+    {
+        $pdo = $this->db->pdo();
+        $month = (string)($query['month'] ?? date('Y-m-01'));
+        $wardId = (string)($query['ward_id'] ?? $query['wardId'] ?? '');
+        $communityId = (string)($query['community_id'] ?? $query['communityId'] ?? '');
+        $status = (string)($query['payment_status'] ?? $query['status'] ?? '');
+
+        $where = " WHERE i.month = :month AND i.eligibility_status = 'eligible'";
+        $params = ['month' => $month];
+
+        if ($wardId !== '') {
+            $where .= " AND (i.ward_id = :ward OR h.ward_id = :ward)";
+            $params['ward'] = $wardId;
+        }
+        if ($communityId !== '') {
+            $where .= " AND (i.community_id = :comm OR h.community_id = :comm)";
+            $params['comm'] = $communityId;
+        }
+        if ($status !== '') {
+            $where .= " AND i.payment_status = :status";
+            $params['status'] = $status;
+        }
+
+        $sql = "SELECT i.*, 
+                       c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url, c.guardian_phone,
+                       h.household_code, h.father_name, h.mother_name, h.primary_contact_name,
+                       w.name AS ward_name, cm.name AS community_name,
+                       s.school_name, sc.class_name
+                FROM incentives i
+                INNER JOIN children c ON c.id = i.child_id
+                LEFT JOIN households h ON h.id = c.household_id
+                LEFT JOIN wards w ON w.id = COALESCE(i.ward_id, h.ward_id, c.ward_id)
+                LEFT JOIN communities cm ON cm.id = COALESCE(i.community_id, h.community_id)
+                LEFT JOIN enrollments e ON e.child_id = c.id AND e.enrollment_status = 'active'
+                LEFT JOIN schools s ON s.id = e.school_id
+                LEFT JOIN school_classes sc ON sc.id = e.class_id
+                {$where}
+                ORDER BY cm.name ASC, c.last_name ASC, c.first_name ASC";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $beneficiaries = $stmt->fetchAll();
+
+        $totalAmount = 0.0;
+        foreach ($beneficiaries as &$b) {
+            $b['amount'] = (float)$b['amount'];
+            $totalAmount += $b['amount'];
+            if (empty($b['recipient_name'])) {
+                $b['recipient_name'] = trim(($b['father_name'] ?? '') . ' / ' . ($b['mother_name'] ?? '')) ?: 'Registered Guardian';
+            }
+        }
+
+        $wardName = 'Ahoto Ward';
+        $communityName = 'All Communities';
+        if ($wardId !== '') {
+            $wStmt = $pdo->prepare('SELECT name FROM wards WHERE id = :id');
+            $wStmt->execute(['id' => $wardId]);
+            $wardName = $wStmt->fetchColumn() ?: $wardName;
+        }
+        if ($communityId !== '') {
+            $cStmt = $pdo->prepare('SELECT name FROM communities WHERE id = :id');
+            $cStmt->execute(['id' => $communityId]);
+            $communityName = $cStmt->fetchColumn() ?: $communityName;
+        }
+
+        return [
+            'manifestReference' => 'MNF-' . date('Ym') . '-' . substr(md5($month . $wardId . $communityId), 0, 6),
+            'generatedAt' => date('Y-m-d H:i:s'),
+            'month' => $month,
+            'state' => 'Jigawa State',
+            'lga' => 'Buji LGA',
+            'ward' => $wardName,
+            'community' => $communityName,
+            'totalBeneficiaries' => count($beneficiaries),
+            'totalAmount' => $totalAmount,
+            'beneficiaries' => $beneficiaries
+        ];
+    }
+
+    public function listIncentives(array $auth, array $query): array
+    {
+        $pdo = $this->db->pdo();
+        [$page, $limit] = [max(1, (int)($query['page'] ?? 1)), min(250, max(1, (int)($query['limit'] ?? 50)))];
+        $offset = ($page - 1) * $limit;
+
+        $from = "incentives i 
+                 INNER JOIN children c ON c.id = i.child_id 
+                 LEFT JOIN households h ON h.id = c.household_id
+                 LEFT JOIN wards w ON w.id = COALESCE(i.ward_id, h.ward_id, c.ward_id)
+                 LEFT JOIN communities cm ON cm.id = COALESCE(i.community_id, h.community_id)
+                 LEFT JOIN enrollments e ON e.child_id = c.id AND e.enrollment_status = 'active'
+                 LEFT JOIN schools s ON s.id = e.school_id
+                 LEFT JOIN school_classes sc ON sc.id = e.class_id";
+
+        $where = " WHERE 1=1";
+        $params = [];
+
+        if (!empty($query['month'])) {
+            $where .= " AND i.month = :f_month";
+            $params['f_month'] = $query['month'];
+        }
+        if (!empty($query['payment_status']) || !empty($query['status'])) {
+            $where .= " AND i.payment_status = :f_status";
+            $params['f_status'] = $query['payment_status'] ?? $query['status'];
+        }
+        if (!empty($query['eligibility_status']) || !empty($query['eligibility'])) {
+            $where .= " AND i.eligibility_status = :f_eligibility";
+            $params['f_eligibility'] = $query['eligibility_status'] ?? $query['eligibility'];
+        }
+        if (!empty($query['payment_method'])) {
+            $where .= " AND i.payment_method = :f_method";
+            $params['f_method'] = $query['payment_method'];
+        }
+        if (!empty($query['ward_id'])) {
+            $where .= " AND (i.ward_id = :f_ward OR h.ward_id = :f_ward)";
+            $params['f_ward'] = $query['ward_id'];
+        }
+        if (!empty($query['community_id'])) {
+            $where .= " AND (i.community_id = :f_comm OR h.community_id = :f_comm)";
+            $params['f_comm'] = $query['community_id'];
+        }
+        if (!empty($query['search'])) {
+            $where .= " AND (c.first_name LIKE :f_q OR c.last_name LIKE :f_q OR c.child_unique_id LIKE :f_q OR h.household_code LIKE :f_q OR i.recipient_name LIKE :f_q OR i.disbursement_reference LIKE :f_q)";
+            $params['f_q'] = '%' . trim((string)$query['search']) . '%';
+        }
+
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM {$from} {$where}");
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        $select = "i.*, c.child_unique_id, c.first_name, c.last_name, c.gender, c.photo_url,
+                   h.household_code, h.father_name, h.mother_name,
+                   w.name AS ward_name, cm.name AS community_name,
+                   s.school_name, sc.class_name";
+
+        $sql = "SELECT {$select} FROM {$from} {$where} ORDER BY i.month DESC, i.created_at DESC LIMIT :limit OFFSET :offset";
+        $stmt = $pdo->prepare($sql);
+        foreach ($params as $k => $v) $stmt->bindValue(':' . $k, $v);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return ['data' => $stmt->fetchAll(), 'page' => $page, 'limit' => $limit, 'total' => $total];
+    }
+
     public function approveIncentive(array $auth,string $id,array $data):array { $before=$this->one('incentives',$id);if($before['eligibility_status']!=='eligible')throw new RuntimeException('Only eligible incentives can be approved.');$status=$data['paymentStatus']??'approved';if(!in_array($status,['approved','rejected'],true))throw new RuntimeException('paymentStatus must be approved or rejected.');$this->db->pdo()->prepare('UPDATE incentives SET payment_status=:status,approved_by=:user WHERE id=:id')->execute(['status'=>$status,'user'=>$auth['id'],'id'=>$id]);$after=$this->one('incentives',$id);$this->audit->record($auth['id'],'APPROVE','incentive',$id,$before,$after);return$after; }
     public function disburseIncentive(array $auth,string $id,array $data):array { if(empty($data['disbursementReference']))throw new RuntimeException('disbursementReference is required.');$before=$this->one('incentives',$id);if($before['payment_status']!=='approved')throw new RuntimeException('Only approved incentives can be marked disbursed.');$this->db->pdo()->prepare("UPDATE incentives SET payment_status='disbursed',disbursed_by=:user,disbursement_date=NOW(),disbursement_reference=:reference WHERE id=:id")->execute(['user'=>$auth['id'],'reference'=>$data['disbursementReference'],'id'=>$id]);$after=$this->one('incentives',$id);$this->audit->record($auth['id'],'DISBURSE','incentive',$id,$before,$after);return$after; }
     public function listTsangaya(array $auth, array $query): array { return $this->wardRegister($auth, 'tsangaya_schools t LEFT JOIN schools s ON s.id=t.integrated_school_id LEFT JOIN communities cm ON cm.id=t.community_id', 't.ward_id', 't.*,s.school_name AS integrated_school_name,cm.name AS community_name', 't.tsangaya_name', $query); }
@@ -515,9 +879,6 @@ final class ProgramService
     private function cohortOwned(array $auth,string $id):array{$record=$this->one('cohorts',$id);if(!in_array($auth['role'],['super_admin','program_admin'],true)&&$record['created_by']!==$auth['id']&&($record['delegated_user_id']??null)!==$auth['id'])throw new RuntimeException('This cohort is not owned by your programme account.');return$record;}
     private function assertResultEditAccess(array $auth, string $classId, string $subject): void
     {
-        if (in_array($auth['role'], ['super_admin', 'program_admin'], true)) {
-            return;
-        }
         $pdo = $this->db->pdo();
         if ($auth['role'] === 'headmaster') {
             $stmt = $pdo->prepare('SELECT school_id FROM school_classes WHERE id=:class');

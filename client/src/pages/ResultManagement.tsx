@@ -163,7 +163,8 @@ export default function ResultManagement() {
   // Search filter
   const [searchQuery, setSearchQuery] = useState("");
 
-  const isHeadmaster = user?.role === "headmaster" || user?.role === "super_admin" || user?.role === "program_admin";
+  const isHeadmaster = user?.role === "headmaster";
+  const canRecordResult = user?.role === "headmaster" || user?.role === "teacher";
   const isClassTeacher = useMemo(() => {
     if (!user || !classReport?.class?.teacherId) return false;
     return user.id === classReport.class.teacherId;
@@ -348,12 +349,13 @@ export default function ResultManagement() {
   // Check if current user can edit this subject
   const canEditCurrentSubject = useMemo(() => {
     if (isSubjectLocked) return false;
+    if (user?.role !== "headmaster" && user?.role !== "teacher") return false;
     if (isHeadmaster) return true;
     if (isClassTeacher) return true;
     return allocations.some(
       (a) => a.class_id === selectedClassId && a.subject_name.toLowerCase() === selectedSubject.toLowerCase() && a.teacher_id === user?.id
     );
-  }, [isSubjectLocked, isHeadmaster, isClassTeacher, allocations, selectedClassId, selectedSubject, user]);
+  }, [isSubjectLocked, user, isHeadmaster, isClassTeacher, allocations, selectedClassId, selectedSubject]);
 
   // Save Batch of Scores (Draft)
   const handleSaveDraft = async () => {
@@ -776,30 +778,34 @@ export default function ResultManagement() {
 
             {/* Single-Tier Unified Action Toolbar */}
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* Primary Entry Action */}
-              <button
-                onClick={() => {
-                  setSingleEnrollmentId(classReport?.students[0]?.enrollmentId || "");
-                  setSingleSubject(selectedSubject || subjects[0]?.subject_name || "");
-                  setSingleCaScore("");
-                  setSingleExamScore("");
-                  setSingleComments("");
-                  setSingleModalOpen(true);
-                }}
-                className="action-press inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 text-xs font-bold shadow transition-colors"
-              >
-                <PlusCircle size={15} />
-                <span>Record Result</span>
-              </button>
+              {/* Primary Entry Action (Teachers and Headmasters only) */}
+              {canRecordResult && (
+                <>
+                  <button
+                    onClick={() => {
+                      setSingleEnrollmentId(classReport?.students[0]?.enrollmentId || "");
+                      setSingleSubject(selectedSubject || subjects[0]?.subject_name || "");
+                      setSingleCaScore("");
+                      setSingleExamScore("");
+                      setSingleComments("");
+                      setSingleModalOpen(true);
+                    }}
+                    className="action-press inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white px-4 text-xs font-bold shadow transition-colors"
+                  >
+                    <PlusCircle size={15} />
+                    <span>Record Result</span>
+                  </button>
 
-              {/* Bulk Import */}
-              <button
-                onClick={() => setBulkImportOpen(true)}
-                className="action-press inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-3.5 text-xs font-bold shadow-sm transition-colors"
-              >
-                <Upload size={14} className="text-emerald-700" />
-                <span>Bulk CSV</span>
-              </button>
+                  {/* Bulk Import */}
+                  <button
+                    onClick={() => setBulkImportOpen(true)}
+                    className="action-press inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-3.5 text-xs font-bold shadow-sm transition-colors"
+                  >
+                    <Upload size={14} className="text-emerald-700" />
+                    <span>Bulk CSV</span>
+                  </button>
+                </>
+              )}
 
               {/* Batch Print Cards */}
               <button

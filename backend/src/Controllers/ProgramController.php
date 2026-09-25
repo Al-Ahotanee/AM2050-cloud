@@ -26,8 +26,8 @@ final class ProgramController
     public function result(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->results($actor, $request->body()), 201); }
     public function resultsBatch(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->resultsBatch($actor, $request->body()), 201); }
     public function submitResults(Request $request): never { $actor = $this->allow($request, self::SCHOOL_RECORDING_ROLES); Response::success($this->service->submitResults($actor, $request->body())); }
-    public function publishResults(Request $request): never { $actor = $this->allow($request, ['headmaster', 'super_admin', 'program_admin']); Response::success($this->service->publishResults($actor, $request->body())); }
-    public function unpublishResults(Request $request): never { $actor = $this->allow($request, ['headmaster', 'super_admin', 'program_admin']); Response::success($this->service->unpublishResults($actor, $request->body())); }
+    public function publishResults(Request $request): never { $actor = $this->allow($request, ['headmaster']); Response::success($this->service->publishResults($actor, $request->body())); }
+    public function unpublishResults(Request $request): never { $actor = $this->allow($request, ['headmaster']); Response::success($this->service->unpublishResults($actor, $request->body())); }
     public function classReportSheets(Request $request, array $params): never { $actor = $this->allow($request, self::EDUCATION_ROLES); Response::success($this->service->classReportSheets($actor, $params['id'], $request->query)); }
     public function enrollmentReportSheet(Request $request, array $params): never { $actor = $this->allow($request, self::EDUCATION_ROLES); Response::success($this->service->enrollmentReportSheet($actor, $params['id'], $request->query)); }
     public function behaviors(Request $request): never { $this->paginated($request, fn() => $this->service->listBehavior($this->allow($request, self::EDUCATION_ROLES), $request->query)); }
@@ -55,6 +55,10 @@ final class ProgramController
     public function cohortDelegate(Request $request,array $params): never {$actor=$this->allow($request,['super_admin','program_admin']);Response::success($this->service->delegateCohort($actor,$params['id'],$request->body()));}
     public function guardianChildren(Request $request): never { $actor=$this->allow($request,['guardian']);Response::success($this->service->guardianChildren($actor)); }
     public function incentives(Request $request): never { $actor = $this->allow($request, ['super_admin','program_admin']); Response::success($this->service->incentiveCompute($actor, $request->body())); }
+    public function incentivesSummary(Request $request): never { $actor = $this->allow($request, ['super_admin','program_admin','lga_supervisor','ward_supervisor']); Response::success($this->service->incentivesSummary($actor, $request->query)); }
+    public function batchApproveIncentives(Request $request): never { $actor = $this->allow($request, ['super_admin','program_admin']); Response::success($this->service->batchApproveIncentives($actor, $request->body())); }
+    public function batchDisburseIncentives(Request $request): never { $actor = $this->allow($request, ['super_admin','program_admin']); Response::success($this->service->batchDisburseIncentives($actor, $request->body())); }
+    public function voucherManifest(Request $request): never { $actor = $this->allow($request, ['super_admin','program_admin','lga_supervisor','ward_supervisor']); Response::success($this->service->voucherManifest($actor, $request->query)); }
     public function complianceList(Request $request): never { $this->paginated($request, fn() => $this->service->listCompliance($this->allow($request, self::SUPERVISION_ROLES), $request->query)); }
     public function complianceCreate(Request $request): never { $actor=$this->allow($request,self::SUPERVISION_ROLES);Response::success($this->service->createCompliance($actor,$request->body()),201); }
     public function complianceUpdate(Request $request,array $params): never { $actor=$this->allow($request,self::SUPERVISION_ROLES);Response::success($this->service->updateCompliance($actor,$params['id'],$request->body())); }
